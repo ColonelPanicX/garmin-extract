@@ -8,19 +8,20 @@ Garmin has no public API for personal health data. Every Python library that tri
 
 This project solves the problem by running a **real Chrome browser** (via SeleniumBase's undetected-chromedriver mode). All API calls are executed as JavaScript `fetch()` calls from inside the browser context — Python only orchestrates what the browser does. Cloudflare sees a legitimate browser with a real TLS fingerprint and lets it through. On headless Linux servers, Chrome runs inside a virtual framebuffer (Xvfb); on desktop systems it runs directly.
 
-A second problem: Garmin enforces email MFA on every new session. This project handles that automatically by polling your Gmail inbox via the Gmail API and submitting the code without human intervention. Sessions persist for ~30 days via a saved browser profile, so re-authentication is rare.
-
-The result: a pipeline that runs fully unattended from cron.
+Once logged in, Chrome saves the session to a local browser profile and reuses it on subsequent runs. Re-authentication is only needed about once every 30 days.
 
 ## Features
 
 - **25 daily health metrics** pulled from the Garmin Connect SPA's live API endpoints
-- **Fully automated MFA** via Gmail API — no human action needed, even from cron at 6 AM
 - **Historical backfill** from Garmin's bulk data export (`.zip` file)
 - **CSV export** — `garmin_daily.csv` (65 daily columns) and `garmin_activities.csv` (per-workout)
-- **Optional Google Sheets integration** — populates Drive-hosted spreadsheets by year and month
 - Partial failures are non-fatal — the daily file is written with whatever succeeded
 - Idempotent — safe to run multiple times; already-pulled dates are skipped by default
+
+**Optional automation features** (see [Configure Automation](#configure-automation)):
+- Fully automatic MFA via Gmail API — the tool reads your Garmin security code from Gmail so session renewals require no human action
+- Google Sheets integration — populates Drive-hosted spreadsheets by year and month
+- Cron / Task Scheduler setup for daily unattended pulls
 
 ## Requirements
 

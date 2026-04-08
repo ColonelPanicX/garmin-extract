@@ -613,24 +613,72 @@ def _first_run_notice():
         print()
         print("  Looks like your first run — .env not found.")
         print()
-        print("  Suggested setup order:")
-        print("    1  Setup wizard  (installs prerequisites + credentials)")
-        print("    3  Set up Gmail MFA  (recommended for automatic operation)")
-        print("    4  Pull your first day of data")
+        print("  Start with option 1 (Initial Setup) to get everything")
+        print("  installed and configured before pulling data.")
         input("\n  Press Enter to open the menu...")
+
+
+def _submenu(title, options):
+    """
+    Generic sub-menu loop.
+    options: list of (key, label, fn) — fn=None renders as a section header.
+    """
+    keys = {k: fn for k, label, fn in options if fn is not None}
+    while True:
+        print()
+        hr("─")
+        print(f"  {title}")
+        hr("─")
+        print()
+        for key, label, fn in options:
+            if fn is None:
+                print(f"  {label}")
+            else:
+                print(f"    {key}  {label}")
+        print()
+        print("    b  Back")
+        print()
+        hr()
+        choice = input("  Choice: ").strip().lower()
+        if choice == "b":
+            break
+        elif choice in keys:
+            keys[choice]()
+        else:
+            print("  Unrecognized choice.")
+
+
+def menu_initial_setup():
+    _submenu("Initial Setup", [
+        ("1", "Setup wizard  (prerequisites + credentials)", check_prerequisites),
+        ("2", "Update Garmin credentials",                  configure_credentials),
+    ])
+
+
+def menu_pull_data():
+    _submenu("Pull Data", [
+        ("1", "Pull Garmin data",                    pull_data),
+        ("2", "Import from Garmin bulk export (.zip)", import_export),
+        ("3", "Build CSV reports",                   build_csvs),
+    ])
+
+
+def menu_automation():
+    _submenu("Configure Automation", [
+        ("", "─── Unattended MFA ─────────────────────────────────", None),
+        ("1", "Set up Gmail MFA  (auto-handle Garmin security codes)", setup_gmail_mfa),
+        ("", "─── Reporting ───────────────────────────────────────", None),
+        ("2", "Build Google Sheets",                                   build_sheets),
+    ])
 
 
 def main():
     _first_run_notice()
 
     actions = {
-        "1": check_prerequisites,
-        "2": configure_credentials,
-        "3": setup_gmail_mfa,
-        "4": pull_data,
-        "5": import_export,
-        "6": build_csvs,
-        "7": build_sheets,
+        "1": menu_initial_setup,
+        "2": menu_pull_data,
+        "3": menu_automation,
     }
 
     while True:
@@ -639,16 +687,9 @@ def main():
         print("  garmin-extract")
         hr("═")
         print()
-        print("  Setup")
-        print("    1  Setup wizard  (prerequisites + credentials)")
-        print("    2  Update Garmin credentials")
-        print("    3  Set up Gmail MFA automation      (optional)")
-        print()
-        print("  Operations")
-        print("    4  Pull Garmin data")
-        print("    5  Import from Garmin bulk export (.zip)")
-        print("    6  Build CSV reports")
-        print("    7  Build Google Sheets              (optional)")
+        print("    1  Initial Setup")
+        print("    2  Pull Data")
+        print("    3  Configure Automation")
         print()
         print("    q  Quit")
         print()
