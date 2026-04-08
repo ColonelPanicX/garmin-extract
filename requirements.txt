@@ -1,0 +1,9 @@
+seleniumbase>=4.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+requests-oauthlib>=1.3.0
+
+# Google APIs (required for Gmail MFA automation and optional Sheets export)
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0

@@ -1,0 +1,55 @@
+# AI Agent Directories (per-machine, not for version control)
+.claude/
+.codex/
+.gemini/
+
+# Collaboration Workspace (internal AI artifacts — not for version control)
+.collab/
+
+# OS Files
+.DS_Store
+Thumbs.db
+*Zone.Identifier*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+google_credentials.json
+.google_token.json
+
+# Runtime data — local only, not for version control
+data/
+
+# Garmin browser session profile (persists login across runs — do not delete)
+.garmin_browser_profile/
+
+# Garmin OAuth token store (legacy)
+.garmin_tokens/
+
+# MFA handoff files (transient)
+.mfa_code
+.gmail_auth_code
+
+# Logs
+*.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
