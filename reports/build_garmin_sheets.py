@@ -110,19 +110,9 @@ DAILY_HEADERS = [
     ("training_readiness",    "Training Readiness"),
     ("fitness_age",           "Fitness Age"),
     ("chronological_age",     "Chronological Age"),
-    # Lifestyle logging (2026+)
-    ("lifestyle_alcohol",           "Alcohol"),
-    ("lifestyle_alcohol_drinks",    "Alcohol (drinks)"),
-    ("lifestyle_caffeine",          "Morning Caffeine"),
-    ("lifestyle_caffeine_servings", "Caffeine (servings)"),
-    ("lifestyle_journaling",        "Journaling"),
-    ("lifestyle_ear_plugs",         "Ear Plugs/Headphones"),
-    ("lifestyle_nasal_strips",      "Nasal Strips"),
-    ("lifestyle_injured",           "Injured"),
-    ("lifestyle_sex",               "Sex"),
-    ("lifestyle_sexual_activity",   "Sexual Activity"),
-    ("lifestyle_masturbation",      "Masturbation"),
-    ("lifestyle_illness",           "Illness"),
+    # Lifestyle logging columns are dynamic — behavior names vary per user
+    # and are discovered at runtime by build_garmin_csvs.py.
+    # These will be added here when Sheets export is revisited.
 ]
 
 ACTIVITY_HEADERS = [

@@ -39,6 +39,49 @@ def s(value, default=None):
     return value
 
 
+def _behavior_key(name: str) -> str:
+    """Convert a Garmin lifestyle behavior name to a safe snake_case column key.
+
+    Examples:
+        "Alcohol"              → "lifestyle_alcohol"
+        "Morning Caffeine"     → "lifestyle_morning_caffeine"
+        "Ear Plugs/Headphones" → "lifestyle_ear_plugs_headphones"
+    """
+    key = name.lower()
+    for ch in " /()-":
+        key = key.replace(ch, "_")
+    while "__" in key:
+        key = key.replace("__", "_")
+    return "lifestyle_" + key.strip("_")
+
+
+def discover_lifestyle_behaviors(files: list) -> dict:
+    """Scan JSON files and return {behavior_name: has_amounts} for every
+    lifestyle behavior present anywhere in the dataset.
+
+    has_amounts is True if any entry for that behavior includes a non-null
+    amount value — used to decide whether to emit an amount column.
+
+    Returns an empty dict if no lifestyle data exists anywhere.
+    """
+    behaviors: dict[str, bool] = {}
+    for path in files:
+        try:
+            with open(path) as f:
+                raw = json.load(f)
+            ls = raw.get("lifestyle") or {}
+            if not isinstance(ls, dict):
+                continue
+            for name, entry in ls.items():
+                if not isinstance(entry, dict):
+                    continue
+                has_amount = entry.get("amount") is not None
+                behaviors[name] = behaviors.get(name, False) or has_amount
+        except Exception:
+            continue
+    return behaviors
+
+
 def ms_to_date(ms) -> str:
     """Convert millisecond Unix timestamp to YYYY-MM-DD (UTC)."""
     try:
@@ -70,7 +113,7 @@ def meters_to_miles(m) -> float | None:
 # Per-day extraction
 # ---------------------------------------------------------------------------
 
-def extract_day(path: Path) -> dict:
+def extract_day(path: Path, lifestyle_behaviors: dict = None) -> dict:
     """Read one JSON file and return a flat dict for the daily CSV row."""
     with open(path) as f:
         raw = json.load(f)
@@ -221,26 +264,17 @@ def extract_day(path: Path) -> dict:
     spo2_sleep_avg   = s(spo2_full.get("avgSleepSpO2")     or spo2_full.get("averageSpO2"))
     spo2_ondemand    = s(spo2_full.get("onDemandReadingList"))
 
-    # ---- lifestyle logging (2026+) -------------------------------------
-    _LIFESTYLE_BEHAVIORS = [
-        ("Alcohol",              "lifestyle_alcohol",       "lifestyle_alcohol_drinks"),
-        ("Morning Caffeine",     "lifestyle_caffeine",      "lifestyle_caffeine_servings"),
-        ("Journaling",           "lifestyle_journaling",    None),
-        ("Ear Plugs/Headphones", "lifestyle_ear_plugs",     None),
-        ("Nasal Strips",         "lifestyle_nasal_strips",  None),
-        ("Injured",              "lifestyle_injured",       None),
-        ("Sex",                  "lifestyle_sex",           None),
-        ("Sexual Activity",      "lifestyle_sexual_activity", None),
-        ("Masturbation",         "lifestyle_masturbation",  None),
-        ("Illness",              "lifestyle_illness",       None),
-    ]
+    # ---- lifestyle logging -------------------------------------------------
+    # Columns are discovered dynamically from the dataset — not hardcoded.
+    # lifestyle_behaviors is a {name: has_amounts} dict built by discover_lifestyle_behaviors().
     ls = raw.get("lifestyle") or {}
     lifestyle_cols = {}
-    for behavior, status_key, amount_key in _LIFESTYLE_BEHAVIORS:
+    for behavior, has_amount in (lifestyle_behaviors or {}).items():
+        key   = _behavior_key(behavior)
         entry = ls.get(behavior) or {}
-        lifestyle_cols[status_key] = entry.get("status") if entry else None
-        if amount_key:
-            lifestyle_cols[amount_key] = s(entry.get("amount")) if entry else None
+        lifestyle_cols[key] = entry.get("status") if entry else None
+        if has_amount:
+            lifestyle_cols[f"{key}_amount"] = s(entry.get("amount")) if entry else None
 
     return {
         "date":                    date,
@@ -393,13 +427,17 @@ def main():
 
     OUT_DIR.mkdir(exist_ok=True)
 
+    lifestyle_behaviors = discover_lifestyle_behaviors(files)
+    if lifestyle_behaviors:
+        print(f"Lifestyle behaviors found: {', '.join(lifestyle_behaviors)}")
+
     daily_rows      = []
     activity_rows   = []
     errors          = []
 
     for path in files:
         try:
-            row = extract_day(path)
+            row = extract_day(path, lifestyle_behaviors)
             daily_rows.append(row)
             activity_rows.extend(extract_activities(path, path.stem))
         except Exception as e:
