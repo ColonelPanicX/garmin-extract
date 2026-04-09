@@ -2,9 +2,12 @@
 """
 Garmin Connect data puller — browser-based.
 
-All API calls run through Chrome's fetch() via SeleniumBase + Xvfb, which
-means Cloudflare never blocks us. The browser logs in once via SSO and keeps
-a persistent session; subsequent runs load the saved profile and skip login.
+All API calls run through Chrome's fetch() via SeleniumBase, which means
+Cloudflare never blocks us. The browser logs in once via SSO and keeps a
+persistent session; subsequent runs load the saved profile and skip login.
+
+On headless Linux (no $DISPLAY), Chrome runs inside a virtual framebuffer
+(Xvfb). On desktop Linux, Windows, and macOS it runs directly.
 
 Usage:
     python pullers/garmin.py                         # yesterday
@@ -17,6 +20,7 @@ Usage:
 import argparse
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -35,8 +39,13 @@ RATE_LIMIT  = 0.5  # seconds between API calls
 
 
 # ---------------------------------------------------------------------------
-# Xvfb
+# Xvfb (headless Linux only)
 # ---------------------------------------------------------------------------
+
+def needs_virtual_display() -> bool:
+    """Return True only on headless Linux — where Chrome needs a fake screen."""
+    return platform.system() == "Linux" and not os.environ.get("DISPLAY")
+
 
 def start_xvfb(display=":99"):
     proc = subprocess.Popen(
@@ -432,8 +441,10 @@ def main():
     args = parse_args()
     dates = [args.date + timedelta(days=i) for i in range(args.days)]
 
-    print("Starting Xvfb...")
-    xvfb = start_xvfb()
+    xvfb = None
+    if needs_virtual_display():
+        print("Starting Xvfb...")
+        xvfb = start_xvfb()
 
     try:
         print("Launching browser...")
@@ -471,7 +482,8 @@ def main():
                 print(f"  → {out_path}\n")
 
     finally:
-        xvfb.terminate()
+        if xvfb:
+            xvfb.terminate()
 
     print("Done.")
 

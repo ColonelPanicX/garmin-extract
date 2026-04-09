@@ -460,7 +460,7 @@ def setup_gmail_mfa():
         print("  To create it:")
         print("    1. Go to console.cloud.google.com")
         print("    2. Create a project")
-        print("    3. Enable: Gmail API, Google Sheets API, Google Drive API")
+        print("    3. Enable the Gmail API")
         print("    4. Credentials → Create → OAuth 2.0 Client ID → Desktop app")
         print("    5. Download JSON → save as google_credentials.json in this directory")
         print()
@@ -781,8 +781,6 @@ def menu_automation():
     _submenu("Configure Automation", [
         ("", "─── Unattended MFA ─────────────────────────────────", None),
         ("1", "Set up Gmail MFA  (auto-handle Garmin security codes)", setup_gmail_mfa),
-        ("", "─── Reporting ───────────────────────────────────────", None),
-        ("2", "Build Google Sheets",                                   build_sheets),
     ])
 
 
