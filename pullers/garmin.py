@@ -17,7 +17,6 @@ Usage:
 import argparse
 import json
 import os
-import platform
 import subprocess
 import sys
 import time
@@ -38,13 +37,6 @@ RATE_LIMIT  = 0.5  # seconds between API calls
 # ---------------------------------------------------------------------------
 # Xvfb
 # ---------------------------------------------------------------------------
-
-def needs_virtual_display() -> bool:
-    """True if we need to start Xvfb (headless Linux only)."""
-    if platform.system() != "Linux":
-        return False
-    return not os.environ.get("DISPLAY")
-
 
 def start_xvfb(display=":99"):
     proc = subprocess.Popen(
@@ -180,8 +172,12 @@ def _do_login(sb):
                                         break
                             except Exception:
                                 continue
-                        sb.sleep(5)
-                        break
+                        # Wait up to 15s for redirect away from MFA page before looping
+                        for _ in range(15):
+                            sb.sleep(1)
+                            if "/mfa" not in sb.get_current_url():
+                                break
+                        break  # submitted once — don't re-enter MFA loop
             except Exception as e:
                 print(f"MFA input search error: {e}")
             continue
@@ -200,8 +196,12 @@ def _do_login(sb):
                                 break
                         except Exception:
                             continue
-                    sb.sleep(5)
-                    break
+                    # Wait up to 15s for redirect away from MFA page before looping
+                    for _ in range(15):
+                        sb.sleep(1)
+                        if "/mfa" not in sb.get_current_url():
+                            break
+                    break  # submitted once — don't re-enter MFA loop
             except Exception:
                 continue
 
@@ -432,10 +432,8 @@ def main():
     args = parse_args()
     dates = [args.date + timedelta(days=i) for i in range(args.days)]
 
-    xvfb = None
-    if needs_virtual_display():
-        print("Starting Xvfb virtual display...")
-        xvfb = start_xvfb()
+    print("Starting Xvfb...")
+    xvfb = start_xvfb()
 
     try:
         print("Launching browser...")
@@ -473,8 +471,7 @@ def main():
                 print(f"  → {out_path}\n")
 
     finally:
-        if xvfb:
-            xvfb.terminate()
+        xvfb.terminate()
 
     print("Done.")
 

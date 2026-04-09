@@ -233,6 +233,35 @@ Failed metrics are recorded inline rather than aborting the pull:
 - The API endpoints are **reverse-engineered from the Garmin Connect SPA**. They may change with Garmin app updates. If metrics start returning 404/empty responses, the endpoints may need to be re-mapped using Chrome DevTools → Network tab.
 - The `garminconnect` Python library (cyberjunky) added a new mobile SSO OAuth flow in April 2026. If it can bypass Cloudflare without a real browser, it could replace the entire Xvfb/Chrome/SeleniumBase stack. This is under evaluation — the browser-based approach remains production until confirmed.
 
+## Changelog
+
+### 2026-04-08 — Gmail MFA false-match and re-submission loop fixes
+
+Two bugs were found and fixed in production after the initial deployment.
+
+#### Gmail MFA: CSS hex color false-match (`pullers/_gmail_mfa.py`)
+
+**Symptom:** The Gmail MFA poller was extracting `000000` from old Garmin emails instead of the real 6-digit code, then submitting it repeatedly.
+
+**Root causes:**
+1. `_get_message_text()` was returning the HTML part of the email before the plain-text part. Garmin emails include `#000000` (black CSS color) in their HTML body, and the fallback `\b(\d{6})\b` regex matched the hex digits.
+2. The poll loop had no memory of which emails it had already processed — so if the first poll returned a bad email, every subsequent poll would find and re-process it.
+
+**Fixes:**
+- `_get_message_text()` now explicitly prefers `text/plain` over `text/html`.
+- The fallback regex is now `(?<!#)\b(\d{6})\b` — a negative lookbehind that excludes CSS hex colors.
+- Codes where all digits are identical (`000000`, `111111`, etc.) are rejected outright.
+- `wait_for_mfa_gmail()` maintains a `seen_ids` set — each message ID is only processed once per poll session.
+- The `after:` Gmail search filter now uses the exact script start time with no buffer, preventing stale emails from surfacing.
+
+#### MFA re-submission loop (`pullers/garmin.py`)
+
+**Symptom:** After a valid MFA code was submitted, the login poll loop continued iterating. On slow redirects, it found the MFA input again and called `wait_for_mfa()` a second time — submitting a fresh (and wrong) code. Combined with the Gmail bug above, this produced 8+ failed submissions per login attempt.
+
+**Fix:** Both MFA code paths (URL-based `/mfa` detection and selector-based detection) now wait up to 15 seconds for the browser to redirect away from the MFA page before continuing. A `break` after submission ensures `wait_for_mfa()` is called at most once per login attempt.
+
+**Verified in production:** Garmin pull for 2026-04-08 completed successfully. MFA code `184037` was extracted from Gmail on the first try, login completed in a single pass, and all 25 metrics were pulled.
+
 ## License
 
 MIT

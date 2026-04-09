@@ -27,15 +27,27 @@ def _build_gmail_service():
         return None
 
     try:
+        import json as _json
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
 
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        # Read all fields from token file directly — preserves all scopes (gmail + sheets + drive)
+        # rather than locking to the hardcoded SCOPES constant on refresh.
+        tok = _json.loads(TOKEN_FILE.read_text())
+        creds = Credentials(
+            token=tok.get("token"),
+            refresh_token=tok.get("refresh_token"),
+            token_uri=tok.get("token_uri"),
+            client_id=tok.get("client_id"),
+            client_secret=tok.get("client_secret"),
+            scopes=tok.get("scopes", SCOPES),
+        )
 
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            TOKEN_FILE.write_text(creds.to_json())
+            tok["token"] = creds.token
+            TOKEN_FILE.write_text(_json.dumps(tok, indent=2))
 
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
     except Exception as e:
@@ -44,24 +56,32 @@ def _build_gmail_service():
 
 
 def _extract_code_from_text(text: str) -> str | None:
-    """Find a 6-digit Garmin security code in email body text."""
-    # Garmin's email says something like "Your security code is 123456"
-    # or just presents the code prominently
+    """Find a 6-digit Garmin security code in email body text.
+
+    Prefers plain-text context patterns. The bare 6-digit fallback uses a
+    negative lookbehind for '#' to avoid matching CSS hex colors like #000000.
+    Also rejects all-zero and all-same-digit codes which are never real codes.
+    """
     patterns = [
         r"security code[^\d]*(\d{6})",
         r"verification code[^\d]*(\d{6})",
         r"your code[^\d]*(\d{6})",
-        r"\b(\d{6})\b",  # fallback: any 6-digit number
+        r"code[:\s]+(\d{6})",
+        r"(?<!#)\b(\d{6})\b",  # fallback — excludes CSS hex colors like #000000
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return match.group(1)
+            code = match.group(1)
+            # Reject obviously invalid codes
+            if len(set(code)) == 1:  # all same digit: 000000, 111111, etc.
+                continue
+            return code
     return None
 
 
 def _get_message_text(service, msg_id: str) -> str:
-    """Decode a Gmail message body to plain text."""
+    """Decode a Gmail message body, preferring plain text over HTML."""
     msg = service.users().messages().get(
         userId="me", id=msg_id, format="full"
     ).execute()
@@ -69,19 +89,29 @@ def _get_message_text(service, msg_id: str) -> str:
     payload = msg.get("payload", {})
     parts   = payload.get("parts", [payload])
 
+    # Prefer text/plain to avoid matching CSS hex colors in HTML bodies
+    plain = html = ""
     for part in parts:
         mime = part.get("mimeType", "")
-        if "text" in mime:
-            data = part.get("body", {}).get("data", "")
-            if data:
-                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-    return ""
+        data = part.get("body", {}).get("data", "")
+        if not data:
+            continue
+        decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+        if mime == "text/plain":
+            plain = decoded
+        elif mime == "text/html" and not html:
+            html = decoded
+
+    return plain or html
 
 
 def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
     """
     Poll Gmail for a Garmin MFA code. Returns the code string, or None
     if credentials are unavailable or the poll times out.
+
+    Tracks seen message IDs so the same email is never processed twice,
+    preventing stale emails from being resubmitted on repeated poll loops.
 
     Args:
         timeout: seconds to poll before giving up (default 5 minutes)
@@ -92,21 +122,21 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
     print("  [gmail] Polling inbox for Garmin MFA code...")
 
-    # Record start time — only look at emails received after this point
-    start_epoch_ms = int(time.time() * 1000)
-    start_epoch_s  = int(time.time())
-    poll_interval  = 5  # seconds between checks
-    elapsed        = 0
+    # Only look at emails received after this script started
+    start_epoch_s = int(time.time())
+    poll_interval = 5   # seconds between checks
+    elapsed       = 0
+    seen_ids      = set()  # never re-process the same email
 
     while elapsed < timeout:
         time.sleep(poll_interval)
         elapsed += poll_interval
 
         try:
-            # Search for Garmin MFA emails received in the last few minutes
+            # Search for Garmin MFA emails received since script start
             query = (
                 f"from:noreply@garmin.com "
-                f"after:{start_epoch_s - 60} "
+                f"after:{start_epoch_s} "
                 f"subject:(security code OR verification OR sign-in)"
             )
             result = service.users().messages().list(
@@ -115,19 +145,25 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
             messages = result.get("messages", [])
             if not messages:
-                # Broader fallback — any recent garmin email
-                query2 = f"from:garmin.com after:{start_epoch_s - 60}"
+                # Broader fallback — any recent garmin.com email
+                query2 = f"from:garmin.com after:{start_epoch_s}"
                 result2 = service.users().messages().list(
                     userId="me", q=query2, maxResults=5
                 ).execute()
                 messages = result2.get("messages", [])
 
             for msg in messages:
+                if msg["id"] in seen_ids:
+                    continue  # already tried this email
+                seen_ids.add(msg["id"])
+
                 text = _get_message_text(service, msg["id"])
                 code = _extract_code_from_text(text)
                 if code:
-                    print(f"  [gmail] Found MFA code in email.")
+                    print(f"  [gmail] Found MFA code in email (msg {msg['id'][:8]}...).")
                     return code
+                else:
+                    print(f"  [gmail] Email found but no valid code extracted (msg {msg['id'][:8]}...).")
 
             print(f"  [gmail] No code yet ({elapsed}s elapsed)...")
 
