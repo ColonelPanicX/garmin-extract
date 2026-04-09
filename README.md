@@ -14,13 +14,12 @@ Once logged in, Chrome saves the session to a local browser profile and reuses i
 
 - **25 daily health metrics** pulled from the Garmin Connect SPA's live API endpoints
 - **Historical backfill** from Garmin's bulk data export (`.zip` file)
-- **CSV export** — `garmin_daily.csv` (65 daily columns) and `garmin_activities.csv` (per-workout)
+- **CSV export** — `garmin_daily.csv` (daily metrics) and `garmin_activities.csv` (per-workout)
 - Partial failures are non-fatal — the daily file is written with whatever succeeded
 - Idempotent — safe to run multiple times; already-pulled dates are skipped by default
 
 **Optional automation features** (see [Configure Automation](#configure-automation)):
 - Fully automatic MFA via Gmail API — the tool reads your Garmin security code from Gmail so session renewals require no human action
-- Google Sheets integration — populates Drive-hosted spreadsheets by year and month
 - Cron / Task Scheduler setup for daily unattended pulls
 
 ## Requirements
@@ -55,7 +54,7 @@ sudo apt install -y xvfb
 ### 2. Clone and install
 
 ```bash
-git clone https://github.com/your-username/garmin-extract.git
+git clone https://github.com/ColonelPanicX/garmin-extract.git
 cd garmin-extract
 
 python3 -m venv .venv
@@ -97,7 +96,11 @@ The shell wrapper auto-detects its own location — no hardcoded paths. Logs go 
 
 ## Usage
 
-### Daily puller
+The interactive menu (`python garmin_extract.py`) is the recommended way to pull data — it covers all workflows below and auto-builds CSVs after every pull.
+
+### Daily puller (CLI / scripting)
+
+For automation or scripting, the puller can be invoked directly:
 
 ```bash
 python pullers/garmin.py                          # yesterday (default)
@@ -140,7 +143,7 @@ When Garmin requires an MFA code (approximately every 30 days), this module poll
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com)
 2. Create a new project
-3. Enable the **Gmail API**, **Google Sheets API**, and **Google Drive API**
+3. Enable the **Gmail API**
 4. Go to **Credentials** → **Create Credentials** → **OAuth 2.0 Client ID** → **Desktop app**
 5. Download the JSON file and save it as `google_credentials.json` in the project root
 
@@ -165,18 +168,6 @@ Waiting up to 5 minutes...
 ```
 
 Write the code to the file and the pipeline continues.
-
-## Google Sheets (optional)
-
-`reports/build_garmin_sheets.py` creates year-per-spreadsheet, month-per-tab Google Sheets populated from the CSV exports.
-
-```bash
-python reports/build_garmin_sheets.py              # all years
-python reports/build_garmin_sheets.py --year 2026  # specific year
-python reports/build_garmin_sheets.py --rebuild    # delete and recreate existing sheets
-```
-
-Requires `GOOGLE_DRIVE_FOLDER_ID` set in `.env` (the folder ID from a Google Drive URL) and the Gmail MFA setup completed (same Google credentials are reused).
 
 ## Data output
 
