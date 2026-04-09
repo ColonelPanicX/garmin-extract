@@ -11,7 +11,7 @@ import os
 import platform
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT   = Path(__file__).parent
@@ -478,30 +478,127 @@ def setup_gmail_mfa():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Pull Garmin data
+# Pull helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def pull_data():
-    header("Pull Garmin Data")
+def _parse_date(s):
+    """Accept YYYY-MM-DD, MM/DD/YYYY, MM/DD/YY, MM-DD-YYYY, MM-DD-YY."""
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
+        try:
+            return datetime.strptime(s.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
 
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    print(f"  Default: yesterday ({yesterday})")
-    print("  For a range: enter a start date and number of days.\n")
 
-    date_in = input(f"  Date [Enter for {yesterday}]: ").strip()
-    target  = date_in if date_in else yesterday
-
-    days_in = input("  Days  [Enter for 1]: ").strip()
-    days    = int(days_in) if days_in.isdigit() and int(days_in) > 0 else 1
-
-    reskip = input("  Re-pull dates that already exist? [y/N]: ").strip().lower()
-
-    cmd = [PYTHON, str(ROOT / "pullers" / "garmin.py"), "--date", target, "--days", str(days)]
-    if reskip == "y":
+def _run_pull(start_date, days, no_skip=False):
+    """Run the Garmin puller, then immediately rebuild CSVs."""
+    cmd = [PYTHON, str(ROOT / "pullers" / "garmin.py"),
+           "--date", start_date, "--days", str(days)]
+    if no_skip:
         cmd.append("--no-skip")
 
+    result = subprocess.run(cmd)
+
     print()
-    run(cmd)
+    print("  Building CSV reports...")
+    subprocess.run([PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")])
+    print()
+    print("  Done.")
+    print(f"  · reports/garmin_daily.csv")
+    print(f"  · reports/garmin_activities.csv")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Pull data — sub-menu actions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _pull_yesterday():
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    print(f"\n  Pulling {yesterday}...\n")
+    _run_pull(yesterday, 1)
+    input("\n  Press Enter to continue...")
+
+
+def _pull_last_n(n, label):
+    start = (date.today() - timedelta(days=n)).isoformat()
+    print(f"\n  Pulling {label} ({start} → yesterday)...\n")
+    _run_pull(start, n)
+    input("\n  Press Enter to continue...")
+
+
+def _pull_custom():
+    header("Custom Date Pull")
+    print("  Accepted date formats: YYYY-MM-DD  |  MM/DD/YYYY  |  MM/DD/YY\n")
+
+    raw = input("  Start date: ").strip()
+    if not raw:
+        return
+    start = _parse_date(raw)
+    if not start:
+        print(f"\n  Could not parse '{raw}' as a date. Try: 2025-04-07 or 04/07/2025")
+        input("\n  Press Enter to continue...")
+        return
+
+    days_in = input("  Number of days to pull [Enter for 1]: ").strip()
+    days = int(days_in) if days_in.isdigit() and int(days_in) > 0 else 1
+
+    end = (datetime.strptime(start, "%Y-%m-%d").date() + timedelta(days=days - 1)).isoformat()
+    range_label = start if days == 1 else f"{start} → {end}"
+    print(f"\n  Pulling {days} day(s): {range_label}")
+
+    reskip = input("  Re-pull dates that already have data? [y/N]: ").strip().lower()
+    print()
+    _run_pull(start, days, no_skip=(reskip == "y"))
+    input("\n  Press Enter to continue...")
+
+
+def _pull_everything():
+    header("Pull Full History")
+    print("  Pulls every day from a start date through yesterday.")
+    print("  Use this to build a complete data history via the live API.\n")
+    print("  Each day takes ~15 seconds to pull.")
+    print("  · 1 month  ≈  7 minutes")
+    print("  · 6 months ≈  45 minutes")
+    print("  · 1 year   ≈  90 minutes\n")
+    print("  For very large history pulls, the Garmin bulk export (option 4)")
+    print("  is faster — request it from Garmin and import the .zip.\n")
+    print("  Accepted date formats: YYYY-MM-DD  |  MM/DD/YYYY  |  MM/DD/YY\n")
+
+    raw = input("  Pull data starting from: ").strip()
+    if not raw:
+        return
+    start_str = _parse_date(raw)
+    if not start_str:
+        print(f"\n  Could not parse '{raw}'. Try: 2023-01-01 or 01/01/2023")
+        input("\n  Press Enter to continue...")
+        return
+
+    start_dt  = datetime.strptime(start_str, "%Y-%m-%d").date()
+    yesterday = date.today() - timedelta(days=1)
+    days      = (yesterday - start_dt).days + 1
+
+    if days <= 0:
+        print("\n  Start date must be before today.")
+        input("\n  Press Enter to continue...")
+        return
+
+    mins = days * 15 // 60
+    time_est = (f"~{mins // 60}h {mins % 60}m" if mins >= 60 else f"~{mins} min") if mins else "< 1 min"
+
+    print(f"\n  {days} days  ({start_str} → {yesterday.isoformat()})")
+    print(f"  Estimated time: {time_est}\n")
+
+    go = input("  Continue? [y/N]: ").strip().lower()
+    if go != "y":
+        print("  Cancelled.")
+        input("\n  Press Enter to continue...")
+        return
+
+    reskip = input("  Skip dates that already have data? [Y/n]: ").strip().lower()
+    no_skip = (reskip == "n")
+    print()
+    _run_pull(start_str, days, no_skip=no_skip)
     input("\n  Press Enter to continue...")
 
 
@@ -511,7 +608,8 @@ def pull_data():
 
 def import_export():
     header("Import from Garmin Bulk Export")
-    print("  Request your export at:")
+    print("  The Garmin bulk export is the fastest way to load years of")
+    print("  historical data. Request it at:")
     print("  Garmin Connect → Profile → Account → Your Garmin Data")
     print("  (The .zip file arrives within 24–48 hours.)\n")
 
@@ -532,7 +630,15 @@ def import_export():
         cmd.append("--no-skip")
 
     print()
-    run(cmd)
+    subprocess.run(cmd)
+
+    print()
+    print("  Building CSV reports...")
+    subprocess.run([PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")])
+    print()
+    print("  Done.")
+    print(f"  · reports/garmin_daily.csv")
+    print(f"  · reports/garmin_activities.csv")
     input("\n  Press Enter to continue...")
 
 
@@ -657,9 +763,17 @@ def menu_initial_setup():
 
 def menu_pull_data():
     _submenu("Pull Data", [
-        ("1", "Pull Garmin data",                    pull_data),
-        ("2", "Import from Garmin bulk export (.zip)", import_export),
-        ("3", "Build CSV reports",                   build_csvs),
+        ("", "─── Recent ──────────────────────────────────────────", None),
+        ("1", "Yesterday",                                           _pull_yesterday),
+        ("2", "Last 7 days",                                         lambda: _pull_last_n(7,  "last 7 days")),
+        ("3", "Last 30 days",                                        lambda: _pull_last_n(30, "last 30 days")),
+        ("", "─── Custom ──────────────────────────────────────────", None),
+        ("4", "Specific date or date range",                         _pull_custom),
+        ("5", "Full history  (from a date you choose to today)",     _pull_everything),
+        ("", "─── Historical import ───────────────────────────────", None),
+        ("6", "Import from Garmin bulk export (.zip)",               import_export),
+        ("", "─── Reports ─────────────────────────────────────────", None),
+        ("7", "Rebuild CSV reports  (from existing pulled data)",    build_csvs),
     ])
 
 
