@@ -226,6 +226,14 @@ Failed metrics are recorded inline rather than aborting the pull:
 
 ## Changelog
 
+### 2026-04-09 — CSV normalization and lifestyle logging fix
+
+**Human-readable column headers:** All columns in `garmin_daily.csv` and `garmin_activities.csv` now use plain English names with units in parentheses (e.g. `Resting Heart Rate (bpm)`, `Deep Sleep (seconds)`, `Floors Ascended (meters)`).
+
+**Lifestyle logging fix:** The lifestyle behavior extraction was reading from the wrong part of the JSON structure and silently producing empty columns. It now correctly reads from `lifestyle.dailyLogsReport[]`. Logged behaviors appear as `Yes`/`No` per day; behaviors not logged on a given day show `N/A`. Quantity-tracked behaviors (e.g. Alcohol) also get an `(amount)` column with the summed value. Behavior columns are discovered dynamically from the user's actual data — no behavior names are hardcoded.
+
+**Sleep timestamps:** `Sleep Start (UTC)` and `Sleep End (UTC)` were previously stored as raw millisecond epoch values. They are now converted to ISO 8601 strings (`YYYY-MM-DDTHH:MM:SSZ`).
+
 ### 2026-04-08 — Gmail MFA false-match and re-submission loop fixes
 
 Two bugs were found and fixed in production after the initial deployment.
