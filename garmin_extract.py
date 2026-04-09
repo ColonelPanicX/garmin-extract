@@ -51,10 +51,6 @@ def save_env(vals):
         "# Garmin Connect credentials",
         f"GARMIN_EMAIL={vals.get('GARMIN_EMAIL', '')}",
         f"GARMIN_PASSWORD={vals.get('GARMIN_PASSWORD', '')}",
-        "",
-        "# Google Drive folder ID (from Drive URL: drive.google.com/drive/folders/<ID>)",
-        "# Required only when using the Google Sheets export script",
-        f"GOOGLE_DRIVE_FOLDER_ID={vals.get('GOOGLE_DRIVE_FOLDER_ID', 'your_folder_id_here')}",
     ]
     ENV.write_text("\n".join(lines) + "\n")
 
@@ -656,50 +652,6 @@ def build_csvs():
     cmd   = [PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")]
     if since:
         cmd += ["--since", since]
-
-    print()
-    run(cmd)
-    input("\n  Press Enter to continue...")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. Build Google Sheets
-# ─────────────────────────────────────────────────────────────────────────────
-
-def build_sheets():
-    header("Build Google Sheets")
-
-    if not (ROOT / ".google_token.json").exists():
-        print("  Google credentials not configured.")
-        print("  Run option 3 (Gmail MFA setup) first — the same credentials")
-        print("  are used for Sheets access.")
-        input("\n  Press Enter to continue...")
-        return
-
-    env = load_env()
-    folder_id = env.get("GOOGLE_DRIVE_FOLDER_ID", "")
-
-    if not folder_id or folder_id == "your_folder_id_here":
-        print("  GOOGLE_DRIVE_FOLDER_ID is not set.\n")
-        print("  Find your folder ID in the Drive URL:")
-        print("  drive.google.com/drive/folders/<FOLDER_ID>\n")
-        new_id = input("  Folder ID (Enter to cancel): ").strip()
-        if not new_id:
-            input("\n  Press Enter to continue...")
-            return
-        env["GOOGLE_DRIVE_FOLDER_ID"] = new_id
-        save_env(env)
-        os.environ["GOOGLE_DRIVE_FOLDER_ID"] = new_id
-        print("  Saved to .env\n")
-
-    year_in = input("  Year to process [Enter for all years]: ").strip()
-    rebuild = input("  Rebuild existing sheets? [y/N]: ").strip().lower()
-
-    cmd = [PYTHON, str(ROOT / "reports" / "build_garmin_sheets.py")]
-    if year_in.isdigit():
-        cmd += ["--year", year_in]
-    if rebuild == "y":
-        cmd.append("--rebuild")
 
     print()
     run(cmd)

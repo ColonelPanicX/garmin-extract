@@ -14,4 +14,10 @@ LOG="/tmp/garmin-pull.log"
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG"
 cd "$PROJECT_DIR"
 "$PYTHON" pullers/garmin.py >> "$LOG" 2>&1
-echo "Exit: $?" >> "$LOG"
+PULL_EXIT=$?
+echo "Pull exit: $PULL_EXIT" >> "$LOG"
+
+if [ "$PULL_EXIT" -eq 0 ]; then
+    "$PYTHON" reports/build_garmin_csvs.py >> "$LOG" 2>&1
+    echo "CSV build exit: $?" >> "$LOG"
+fi

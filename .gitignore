@@ -27,6 +27,9 @@ google_credentials.json
 # Runtime data — local only, not for version control
 data/
 
+# Generated CSV reports — rebuilt from local data, not for version control
+reports/*.csv
+
 # Garmin browser session profile (persists login across runs — do not delete)
 .garmin_browser_profile/
 
