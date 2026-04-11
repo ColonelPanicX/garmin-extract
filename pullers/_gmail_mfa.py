@@ -7,14 +7,13 @@ Falls back gracefully if credentials are missing or the API call fails.
 """
 
 import base64
-import json
 import re
 import time
 from pathlib import Path
 
-ROOT             = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent
 CREDENTIALS_FILE = ROOT / "google_credentials.json"
-TOKEN_FILE       = ROOT / ".google_token.json"
+TOKEN_FILE = ROOT / ".google_token.json"
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -27,9 +26,9 @@ def _build_gmail_service():
         return None
 
     try:
-        import json as _json
-        from google.oauth2.credentials import Credentials
+        import json as _json  # noqa: I001
         from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
         # Read all fields from token file directly — preserves all scopes (gmail + sheets + drive)
@@ -82,12 +81,10 @@ def _extract_code_from_text(text: str) -> str | None:
 
 def _get_message_text(service, msg_id: str) -> str:
     """Decode a Gmail message body, preferring plain text over HTML."""
-    msg = service.users().messages().get(
-        userId="me", id=msg_id, format="full"
-    ).execute()
+    msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
 
     payload = msg.get("payload", {})
-    parts   = payload.get("parts", [payload])
+    parts = payload.get("parts", [payload])
 
     # Prefer text/plain to avoid matching CSS hex colors in HTML bodies
     plain = html = ""
@@ -124,9 +121,9 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
     # Only look at emails received after this script started
     start_epoch_s = int(time.time())
-    poll_interval = 5   # seconds between checks
-    elapsed       = 0
-    seen_ids      = set()  # never re-process the same email
+    poll_interval = 5  # seconds between checks
+    elapsed = 0
+    seen_ids = set()  # never re-process the same email
 
     while elapsed < timeout:
         time.sleep(poll_interval)
@@ -139,17 +136,15 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
                 f"after:{start_epoch_s} "
                 f"subject:(security code OR verification OR sign-in)"
             )
-            result = service.users().messages().list(
-                userId="me", q=query, maxResults=5
-            ).execute()
+            result = service.users().messages().list(userId="me", q=query, maxResults=5).execute()
 
             messages = result.get("messages", [])
             if not messages:
                 # Broader fallback — any recent garmin.com email
                 query2 = f"from:garmin.com after:{start_epoch_s}"
-                result2 = service.users().messages().list(
-                    userId="me", q=query2, maxResults=5
-                ).execute()
+                result2 = (
+                    service.users().messages().list(userId="me", q=query2, maxResults=5).execute()
+                )
                 messages = result2.get("messages", [])
 
             for msg in messages:
@@ -163,7 +158,9 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
                     print(f"  [gmail] Found MFA code in email (msg {msg['id'][:8]}...).")
                     return code
                 else:
-                    print(f"  [gmail] Email found but no valid code extracted (msg {msg['id'][:8]}...).")
+                    print(
+                        f"  [gmail] Email found but no valid code extracted (msg {msg['id'][:8]}...)."  # noqa: E501
+                    )
 
             print(f"  [gmail] No code yet ({elapsed}s elapsed)...")
 

@@ -42,6 +42,10 @@ reports/*.csv
 
 # Logs
 *.log
+logs/
+
+# Generated output
+output/
 
 # Python
 .venv/

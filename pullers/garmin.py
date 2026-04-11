@@ -31,16 +31,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ROOT        = Path(__file__).parent.parent
-DATA_DIR    = ROOT / "data" / "garmin"
+ROOT = Path(__file__).parent.parent
+DATA_DIR = ROOT / "data" / "garmin"
 PROFILE_DIR = ROOT / ".garmin_browser_profile"
-MFA_FILE    = ROOT / ".mfa_code"
-RATE_LIMIT  = 0.5  # seconds between API calls
+MFA_FILE = ROOT / ".mfa_code"
+RATE_LIMIT = 0.5  # seconds between API calls
 
 
 # ---------------------------------------------------------------------------
 # Xvfb (headless Linux only)
 # ---------------------------------------------------------------------------
+
 
 def needs_virtual_display() -> bool:
     """Return True only on headless Linux — where Chrome needs a fake screen."""
@@ -62,10 +63,12 @@ def start_xvfb(display=":99"):
 # MFA handoff (file-based, works without interactive stdin)
 # ---------------------------------------------------------------------------
 
+
 def wait_for_mfa() -> str:
     # Try Gmail automation first
     try:
-        from _gmail_mfa import wait_for_mfa_gmail, is_configured
+        from _gmail_mfa import is_configured, wait_for_mfa_gmail  # noqa: I001
+
         if is_configured():
             print("MFA REQUIRED — polling Gmail automatically...")
             code = wait_for_mfa_gmail(timeout=300)
@@ -98,6 +101,7 @@ def wait_for_mfa() -> str:
 # Browser session
 # ---------------------------------------------------------------------------
 
+
 def ensure_logged_in(sb):
     """Check session and log in if needed."""
     # Remove stale Chrome lock files that prevent profile reuse
@@ -123,7 +127,7 @@ def _do_login(sb):
     )
     sb.sleep(3)
 
-    email    = os.environ["GARMIN_EMAIL"]
+    email = os.environ["GARMIN_EMAIL"]
     password = os.environ["GARMIN_PASSWORD"]
 
     sb.type("#email", email)
@@ -136,7 +140,7 @@ def _do_login(sb):
     for i in range(30):
         sb.sleep(1)
         url = sb.get_current_url()
-        page = sb.get_page_source()
+        sb.get_page_source()
 
         if i % 5 == 4:  # screenshot every 5s
             sb.save_screenshot(f"/tmp/garmin_login_{i}.png")
@@ -156,17 +160,24 @@ def _do_login(sb):
         # Also detect by URL — if we're on the /mfa page, find any visible text input
         if "/mfa" in url:
             try:
-                inputs = sb.driver.find_elements("css selector", "input[type='text'], input[type='number'], input:not([type])")
+                inputs = sb.driver.find_elements(  # noqa: E501
+                    "css selector",
+                    "input[type='text'], input[type='number'], input:not([type])",
+                )
                 for inp in inputs:
                     if inp.is_displayed():
                         sb.save_screenshot("/tmp/garmin_mfa_page.png")
-                        print(f"MFA page — found input: name={inp.get_attribute('name')} id={inp.get_attribute('id')}")
+                        print(
+                            f"MFA page — found input: name={inp.get_attribute('name')} id={inp.get_attribute('id')}"  # noqa: E501
+                        )
                         mfa = wait_for_mfa()
                         inp.clear()
                         inp.send_keys(mfa)
                         # Check "Remember this browser" to persist the session
                         try:
-                            remember = sb.driver.find_element("css selector", "input[type='checkbox']")
+                            remember = sb.driver.find_element(
+                                "css selector", "input[type='checkbox']"
+                            )  # noqa: E501
                             if remember and not remember.is_selected():
                                 remember.click()
                                 print("Checked 'Remember this browser'")
@@ -243,6 +254,7 @@ def _do_login(sb):
 # Browser fetch helper
 # ---------------------------------------------------------------------------
 
+
 def browser_fetch(sb, url: str, params: dict = None) -> dict:
     """Execute a GET request from inside the browser via fetch(), with CSRF token."""
     if params:
@@ -279,6 +291,7 @@ def browser_fetch(sb, url: str, params: dict = None) -> dict:
 # Metric definitions
 # ---------------------------------------------------------------------------
 
+
 def get_user_uuid(sb) -> str:
     """Extract Garmin UUID from the SPA's JS context."""
     try:
@@ -307,15 +320,21 @@ def get_display_name(sb) -> str:
     """Return (displayName, uuid) for the logged-in Garmin user."""
     # socialProfile without UUID returns the current user's profile
     endpoints = [
-        ("/userprofile-service/socialProfile",
-         lambda d: (d.get("displayName"), d.get("userUuid") or d.get("uuid"))),
-        ("/userprofile-service/userprofile/personal-information",
-         lambda d: (d.get("displayName") or d.get("userName"), d.get("userUuid"))),
+        (
+            "/userprofile-service/socialProfile",
+            lambda d: (d.get("displayName"), d.get("userUuid") or d.get("uuid")),
+        ),
+        (
+            "/userprofile-service/userprofile/personal-information",
+            lambda d: (d.get("displayName") or d.get("userName"), d.get("userUuid")),
+        ),
     ]
     for path, extractor in endpoints:
         result = browser_fetch(sb, path)
-        print(f"  {path}: ok={result.get('ok')} status={result.get('status')} "
-              f"data={str(result.get('data'))[:150]}")
+        print(
+            f"  {path}: ok={result.get('ok')} status={result.get('status')} "
+            f"data={str(result.get('data'))[:150]}"
+        )
         if result.get("ok") and isinstance(result.get("data"), dict):
             name, uuid = extractor(result["data"])
             if name:
@@ -337,49 +356,71 @@ def get_display_name(sb) -> str:
 def build_metrics(sb, d: date, display_name: str, uuid: str = "") -> list:
     cdate = d.isoformat()
     # Some endpoints use displayName, some use UUID — use whichever is available
-    uid = uuid or display_name
     return [
-        ("stats",               f"/usersummary-service/usersummary/daily/{display_name}",
-                                {"calendarDate": cdate}),
-        ("user_summary_chart",  f"/wellness-service/wellness/dailySummaryChart/{display_name}",
-                                {"date": cdate}),
-        ("heart_rates",         f"/wellness-service/wellness/dailyHeartRate/{display_name}",
-                                {"date": cdate}),
-        ("resting_hr",          f"/userstats-service/wellness/daily/{display_name}",
-                                {"fromDate": cdate, "untilDate": cdate, "metricId": 60}),
-        ("hrv",                 f"/hrv-service/hrv/{cdate}", {}),
-        ("stress",              f"/wellness-service/wellness/dailyStress/{cdate}", {}),
-        ("body_battery",        "/wellness-service/wellness/bodyBattery/reports/daily",
-                                {"startDate": cdate, "endDate": cdate}),
+        (
+            "stats",
+            f"/usersummary-service/usersummary/daily/{display_name}",
+            {"calendarDate": cdate},
+        ),
+        (
+            "user_summary_chart",
+            f"/wellness-service/wellness/dailySummaryChart/{display_name}",
+            {"date": cdate},
+        ),
+        (
+            "heart_rates",
+            f"/wellness-service/wellness/dailyHeartRate/{display_name}",
+            {"date": cdate},
+        ),
+        (
+            "resting_hr",
+            f"/userstats-service/wellness/daily/{display_name}",
+            {"fromDate": cdate, "untilDate": cdate, "metricId": 60},
+        ),
+        ("hrv", f"/hrv-service/hrv/{cdate}", {}),
+        ("stress", f"/wellness-service/wellness/dailyStress/{cdate}", {}),
+        (
+            "body_battery",
+            "/wellness-service/wellness/bodyBattery/reports/daily",
+            {"startDate": cdate, "endDate": cdate},
+        ),
         ("body_battery_events", f"/wellness-service/wellness/bodyBattery/events/{cdate}", {}),
-        ("sleep",               f"/wellness-service/wellness/dailySleepData/{display_name}",
-                                {"date": cdate, "nonSleepBufferMinutes": 60}),
-        ("steps",               f"/usersummary-service/stats/steps/daily/{cdate}/{cdate}", {}),
-        ("floors",              f"/wellness-service/wellness/floorsChartData/daily/{cdate}", {}),
-        ("spo2",                f"/wellness-service/wellness/daily/spo2/{cdate}", {}),
-        ("respiration",         f"/wellness-service/wellness/daily/respiration/{cdate}", {}),
-        ("intensity_minutes",   f"/wellness-service/wellness/daily/im/{cdate}", {}),
-        ("all_day_events",      "/wellness-service/wellness/dailyEvents",
-                                {"calendarDate": cdate}),
-        ("activities",          f"/activitylist-service/activities/search/activities",
-                                {"startDate": cdate, "endDate": cdate, "start": 0, "limit": 20}),
-        ("weigh_ins",           f"/weight-service/weight/dayview/{cdate}",
-                                {"includeAll": "true"}),
-        ("body_composition",    "/weight-service/weight/dateRange",
-                                {"startDate": cdate, "endDate": cdate}),
-        ("blood_pressure",      f"/bloodpressure-service/bloodpressure/range/{cdate}/{cdate}", {}),
-        ("max_metrics",         f"/metrics-service/metrics/maxmet/daily/{cdate}/{cdate}", {}),
-        ("training_readiness",  f"/metrics-service/metrics/trainingreadiness/{cdate}", {}),
-        ("training_status",     f"/metrics-service/metrics/trainingstatus/aggregated/{cdate}", {}),
-        ("fitness_age",         f"/fitnessage-service/fitnessage/{cdate}", {}),
-        ("hydration",           f"/usersummary-service/usersummary/hydration/daily/{cdate}", {}),
-        ("lifestyle",           f"/lifestylelogging-service/dailyLog/{cdate}", {}),
+        (
+            "sleep",
+            f"/wellness-service/wellness/dailySleepData/{display_name}",
+            {"date": cdate, "nonSleepBufferMinutes": 60},
+        ),
+        ("steps", f"/usersummary-service/stats/steps/daily/{cdate}/{cdate}", {}),
+        ("floors", f"/wellness-service/wellness/floorsChartData/daily/{cdate}", {}),
+        ("spo2", f"/wellness-service/wellness/daily/spo2/{cdate}", {}),
+        ("respiration", f"/wellness-service/wellness/daily/respiration/{cdate}", {}),
+        ("intensity_minutes", f"/wellness-service/wellness/daily/im/{cdate}", {}),
+        ("all_day_events", "/wellness-service/wellness/dailyEvents", {"calendarDate": cdate}),
+        (
+            "activities",
+            "/activitylist-service/activities/search/activities",
+            {"startDate": cdate, "endDate": cdate, "start": 0, "limit": 20},
+        ),
+        ("weigh_ins", f"/weight-service/weight/dayview/{cdate}", {"includeAll": "true"}),
+        (
+            "body_composition",
+            "/weight-service/weight/dateRange",
+            {"startDate": cdate, "endDate": cdate},
+        ),
+        ("blood_pressure", f"/bloodpressure-service/bloodpressure/range/{cdate}/{cdate}", {}),
+        ("max_metrics", f"/metrics-service/metrics/maxmet/daily/{cdate}/{cdate}", {}),
+        ("training_readiness", f"/metrics-service/metrics/trainingreadiness/{cdate}", {}),
+        ("training_status", f"/metrics-service/metrics/trainingstatus/aggregated/{cdate}", {}),
+        ("fitness_age", f"/fitnessage-service/fitnessage/{cdate}", {}),
+        ("hydration", f"/usersummary-service/usersummary/hydration/daily/{cdate}", {}),
+        ("lifestyle", f"/lifestylelogging-service/dailyLog/{cdate}", {}),
     ]
 
 
 # ---------------------------------------------------------------------------
 # Pull one date
 # ---------------------------------------------------------------------------
+
 
 def pull_date(sb, d: date, display_name: str, uuid: str = "") -> dict:
     metrics = build_metrics(sb, d, display_name, uuid)
@@ -403,6 +444,7 @@ def pull_date(sb, d: date, display_name: str, uuid: str = "") -> dict:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Pull all Garmin Connect health metrics via browser."
@@ -415,11 +457,14 @@ def parse_args():
         help="Start date (default: yesterday).",
     )
     parser.add_argument(
-        "--days", type=int, default=1,
+        "--days",
+        type=int,
+        default=1,
         help="Number of days to pull from --date (default: 1).",
     )
     parser.add_argument(
-        "--no-skip", action="store_true",
+        "--no-skip",
+        action="store_true",
         help="Re-pull dates that already have a data file.",
     )
     return parser.parse_args()
@@ -432,7 +477,7 @@ def main():
         print("ERROR: seleniumbase not installed. Run: pip install -r requirements.txt")
         sys.exit(1)
 
-    email    = os.environ.get("GARMIN_EMAIL")
+    email = os.environ.get("GARMIN_EMAIL")
     password = os.environ.get("GARMIN_PASSWORD")
     if not email or not password:
         print("ERROR: GARMIN_EMAIL and GARMIN_PASSWORD must be set in .env")

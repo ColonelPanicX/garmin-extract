@@ -6,38 +6,87 @@ Walks through first-time setup and provides a menu for day-to-day operations.
 Run with: python garmin_extract.py
 """
 
+from __future__ import annotations
+
 import getpass
 import os
 import platform
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-ROOT   = Path(__file__).parent
-ENV    = ROOT / ".env"
+from rich.console import Console
+
+ROOT = Path(__file__).parent
+ENV = ROOT / ".env"
 PYTHON = sys.executable
+
+console = Console()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Navigation signals
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BackSignal(Exception):
+    """User pressed 'b' — go back one level."""
+
+
+class ExitToMainSignal(Exception):
+    """User pressed 'x' — return to main menu."""
+
+
+class QuitSignal(Exception):
+    """User pressed 'q' — exit the application."""
+
+
+def prompt_with_navigation(prompt_text: str) -> str:
+    """Wrap any input prompt; raise navigation signals on b / x / q."""
+    response = input(prompt_text).strip()
+    lower = response.lower()
+    if lower == "b":
+        raise BackSignal
+    if lower == "x":
+        raise ExitToMainSignal
+    if lower == "q":
+        raise QuitSignal
+    return response
+
+
+def _continue(prompt: str = "\n  Press Enter to continue...") -> None:
+    """Pause with a continue prompt. Navigation signals propagate normally."""
+    prompt_with_navigation(prompt)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utilities
 # ─────────────────────────────────────────────────────────────────────────────
 
-def hr(char="─", width=52):
+
+def hr(char: str = "─", width: int = 52) -> None:
     print(char * width)
 
-def header(title):
+
+def header(title: str) -> None:
+    content = f"  {title}  "
+    width = max(50, len(content))
+    padding = width - len(content)
     print()
-    hr()
-    print(f"  {title}")
-    hr()
+    console.print(f"╔{'═' * width}╗")
+    console.print(f"║[bold]{content}{' ' * padding}[/]║")
+    console.print(f"╚{'═' * width}╝")
     print()
 
-def run(cmd):
+
+def run(cmd: list[str]) -> None:
     subprocess.run(cmd)
 
-def load_env():
-    vals = {}
+
+def load_env() -> dict[str, str]:
+    vals: dict[str, str] = {}
     if ENV.exists():
         for line in ENV.read_text().splitlines():
             line = line.strip()
@@ -46,7 +95,8 @@ def load_env():
                 vals[k.strip()] = v.strip()
     return vals
 
-def save_env(vals):
+
+def save_env(vals: dict[str, str]) -> None:
     lines = [
         "# Garmin Connect credentials",
         f"GARMIN_EMAIL={vals.get('GARMIN_EMAIL', '')}",
@@ -59,10 +109,11 @@ def save_env(vals):
 # Prerequisite helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _find_chrome():
+
+def _find_chrome() -> tuple[bool, str | None]:
     system = platform.system()
     if system == "Windows":
-        candidates = [
+        candidates: list[str] = [
             "chrome",
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -85,7 +136,7 @@ def _find_chrome():
     return False, None
 
 
-def _find_xvfb():
+def _find_xvfb() -> bool:
     try:
         r = subprocess.run(["which", "Xvfb"], capture_output=True, timeout=5)
         return r.returncode == 0
@@ -93,12 +144,12 @@ def _find_xvfb():
         return False
 
 
-def _missing_packages():
+def _missing_packages() -> list[str]:
     checks = [
-        ("seleniumbase",      "seleniumbase"),
-        ("dotenv",            "python-dotenv"),
-        ("google.oauth2",     "google-auth"),
-        ("googleapiclient",   "google-api-python-client"),
+        ("seleniumbase", "seleniumbase"),
+        ("dotenv", "python-dotenv"),
+        ("google.oauth2", "google-auth"),
+        ("googleapiclient", "google-api-python-client"),
         ("requests_oauthlib", "requests-oauthlib"),
     ]
     missing = []
@@ -114,21 +165,25 @@ def _missing_packages():
 # 1. Setup wizard
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_prerequisites():
+
+def check_prerequisites() -> None:  # noqa: C901
     header("Setup Wizard")
-    system  = platform.system()
-    issues  = []
+    system = platform.system()
+    issues: list[str] = []
 
     # ── Step 1: Python ───────────────────────────────────────────────────────
     print("Step 1 of 5 — Python version")
     print()
-    v  = sys.version_info
+    v = sys.version_info
     ok = v >= (3, 12)
 
     if ok:
-        print(f"  ✓  Python {v.major}.{v.minor}.{v.micro}")
+        console.print(f"  [green]✓[/]  Python {v.major}.{v.minor}.{v.micro}")
     else:
-        print(f"  ✗  Python {v.major}.{v.minor}.{v.micro} — version 3.12 or newer is required.")
+        console.print(
+            f"  [red]✗[/]  Python {v.major}.{v.minor}.{v.micro}"
+            " — version 3.12 or newer is required."
+        )
         print()
         print("  Python is the programming language this tool is written in.")
         print("  Version 3.12 added features this code depends on.")
@@ -149,7 +204,7 @@ def check_prerequisites():
         print()
         print("  Cannot continue until Python 3.12+ is available.")
         issues.append("Python 3.12+")
-        input("\n  Press Enter to return to the menu...")
+        _continue("\n  Press Enter to return to the menu...")
         return
 
     # ── Step 2: Google Chrome ────────────────────────────────────────────────
@@ -161,9 +216,9 @@ def check_prerequisites():
     found, version = _find_chrome()
 
     if found:
-        print(f"  ✓  {version}")
+        console.print(f"  [green]✓[/]  {version}")
     else:
-        print("  ✗  Chrome not found.")
+        console.print("  [red]✗[/]  Chrome not found.")
         print()
         print("  Why Chrome is required:")
         print()
@@ -180,34 +235,37 @@ def check_prerequisites():
             print()
             print("    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \\")
             print("        | sudo apt-key add -")
-            print('    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \\')
+            print(
+                '    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \\'
+            )  # noqa: E501
             print("        | sudo tee /etc/apt/sources.list.d/google-chrome.list")
             print("    sudo apt-get update")
             print("    sudo apt-get install -y google-chrome-stable")
             print("    sudo apt-get --fix-broken install -y")
             print()
-            go = input("  Install Chrome now? [Y/n]: ").strip().lower()
-            if go != "n":
+            go = prompt_with_navigation("  Install Chrome now? [Y/n]: ")
+            if go.lower() != "n":
                 print()
                 cmds = [
-                    "wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -",
+                    "wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -",  # noqa: E501
                     'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" '
-                    '| sudo tee /etc/apt/sources.list.d/google-chrome.list',
+                    "| sudo tee /etc/apt/sources.list.d/google-chrome.list",
                     "sudo apt-get update",
                     "sudo apt-get install -y google-chrome-stable",
                     "sudo apt-get --fix-broken install -y",
                 ]
-                success = True
                 for cmd in cmds:
                     r = subprocess.run(cmd, shell=True)
                     if r.returncode != 0:
-                        success = False
                         break
                 found, version = _find_chrome()
                 if found:
-                    print(f"\n  ✓  Chrome installed: {version}")
+                    console.print(f"\n  [green]✓[/]  Chrome installed: {version}")
                 else:
-                    print("\n  ✗  Installation may not have completed. Check the output above.")
+                    console.print(
+                        "\n  [red]✗[/]  Installation may not have completed."
+                        " Check the output above."
+                    )
                     issues.append("Chrome")
             else:
                 print()
@@ -244,19 +302,19 @@ def check_prerequisites():
     print("Step 3 of 5 — Virtual display (Xvfb)")
     print()
 
-    needs_xvfb = (system == "Linux" and not os.environ.get("DISPLAY"))
+    needs_xvfb = system == "Linux" and not os.environ.get("DISPLAY")
 
     if not needs_xvfb:
         if system == "Linux":
-            print("  ✓  Not needed — a display is already available.")
+            console.print("  [green]✓[/]  Not needed — a display is already available.")
         else:
-            print(f"  ✓  Not needed on {system}.")
+            console.print(f"  [green]✓[/]  Not needed on {system}.")
     else:
         xvfb_ok = _find_xvfb()
         if xvfb_ok:
-            print("  ✓  Xvfb is installed.")
+            console.print("  [green]✓[/]  Xvfb is installed.")
         else:
-            print("  ✗  Xvfb not found.")
+            console.print("  [red]✗[/]  Xvfb not found.")
             print()
             print("  Your system has no monitor or desktop environment (it's a")
             print("  headless server). Chrome needs a screen to run, even when")
@@ -268,14 +326,14 @@ def check_prerequisites():
             print("  We can install it now:")
             print("    sudo apt-get install -y xvfb")
             print()
-            go = input("  Install Xvfb now? [Y/n]: ").strip().lower()
-            if go != "n":
+            go = prompt_with_navigation("  Install Xvfb now? [Y/n]: ")
+            if go.lower() != "n":
                 print()
                 r = subprocess.run(["sudo", "apt-get", "install", "-y", "xvfb"])
                 if r.returncode == 0 and _find_xvfb():
-                    print("\n  ✓  Xvfb installed.")
+                    console.print("\n  [green]✓[/]  Xvfb installed.")
                 else:
-                    print("\n  ✗  Installation may not have completed.")
+                    console.print("\n  [red]✗[/]  Installation may not have completed.")
                     issues.append("Xvfb")
             else:
                 print()
@@ -291,32 +349,32 @@ def check_prerequisites():
     missing = _missing_packages()
 
     if not missing:
-        print("  ✓  All required packages are installed.")
+        console.print("  [green]✓[/]  All required packages are installed.")
     else:
-        print(f"  ✗  Missing: {', '.join(missing)}")
+        console.print(f"  [red]✗[/]  Missing: {', '.join(missing)}")
         print()
         print("  These are the libraries this tool depends on:")
         print()
         print("  · seleniumbase          — controls Chrome")
         print("  · python-dotenv         — reads your .env credentials file")
         print("  · google-auth           — handles Google sign-in for Gmail MFA")
-        print("  · google-api-python-client — connects to Gmail and Google Sheets")
+        print("  · google-api-python-client — connects to Gmail")
         print("  · requests-oauthlib     — handles the Google authorization flow")
         print()
         print("  All packages are listed in requirements.txt and will be")
         print("  installed from the official Python package repository (PyPI).")
         print()
-        go = input("  Install packages now? [Y/n]: ").strip().lower()
-        if go != "n":
+        go = prompt_with_navigation("  Install packages now? [Y/n]: ")
+        if go.lower() != "n":
             print()
             r = subprocess.run(
                 [PYTHON, "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")]
             )
             missing = _missing_packages()
             if not missing:
-                print("\n  ✓  All packages installed.")
+                console.print("\n  [green]✓[/]  All packages installed.")
             else:
-                print(f"\n  ✗  Still missing after install: {', '.join(missing)}")
+                console.print(f"\n  [red]✗[/]  Still missing after install: {', '.join(missing)}")
                 print("  Check the output above for errors.")
                 issues.append("Python packages")
         else:
@@ -333,7 +391,7 @@ def check_prerequisites():
     env = load_env()
 
     if env.get("GARMIN_EMAIL") and env.get("GARMIN_PASSWORD"):
-        print(f"  ✓  Credentials on file: {env['GARMIN_EMAIL']}")
+        console.print(f"  [green]✓[/]  Credentials on file: {env['GARMIN_EMAIL']}")
     else:
         print("  Your Garmin Connect email and password are needed so the tool")
         print("  can log in to Garmin on your behalf.")
@@ -341,7 +399,7 @@ def check_prerequisites():
         print("  These are saved to a local file called .env in this directory.")
         print("  That file is excluded from version control and never shared.")
         print()
-        email = input("  Garmin Connect email: ").strip()
+        email = prompt_with_navigation("  Garmin Connect email: ")
         if not email:
             print("\n  Skipped. Run option 2 to add credentials later.")
             issues.append("Garmin credentials")
@@ -351,10 +409,10 @@ def check_prerequisites():
                 print("\n  Skipped. Run option 2 to add credentials later.")
                 issues.append("Garmin credentials")
             else:
-                env["GARMIN_EMAIL"]    = email
+                env["GARMIN_EMAIL"] = email
                 env["GARMIN_PASSWORD"] = password
                 save_env(env)
-                print("\n  ✓  Saved to .env")
+                console.print("\n  [green]✓[/]  Saved to .env")
 
     # ── Summary ──────────────────────────────────────────────────────────────
     print()
@@ -378,7 +436,7 @@ def check_prerequisites():
         print("    without any action from you.")
         print()
         print("  · Manual fallback: if Gmail MFA is not set up, the tool")
-        print('    will print:  Run: echo YOUR_CODE > .mfa_code')
+        print("    will print:  Run: echo YOUR_CODE > .mfa_code")
         print("    Open your email, find the code, and run that command")
         print("    in a second terminal window.")
         print()
@@ -397,52 +455,54 @@ def check_prerequisites():
         print()
         print("  Follow the instructions above, then re-run option 1.")
 
-    input("\n  Press Enter to continue...")
+    _continue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Configure Garmin credentials
 # ─────────────────────────────────────────────────────────────────────────────
 
-def configure_credentials():
+
+def configure_credentials() -> None:
     header("Configure Garmin Credentials")
     print("  Stored in .env (gitignored — never committed).\n")
     env = load_env()
 
     cur_email = env.get("GARMIN_EMAIL", "")
-    cur_pass  = env.get("GARMIN_PASSWORD", "")
+    cur_pass = env.get("GARMIN_PASSWORD", "")
 
     if cur_email:
         print(f"  Current email:    {cur_email}")
-        new = input("  New email         (Enter to keep): ").strip()
-        email = new or cur_email
+        new_email = prompt_with_navigation("  New email         (Enter to keep): ")
+        email = new_email or cur_email
     else:
-        email = input("  Garmin email: ").strip()
+        email = prompt_with_navigation("  Garmin email: ")
 
     if cur_pass:
         print(f"  Current password: {'*' * min(len(cur_pass), 12)}")
-        new = getpass.getpass("  New password      (Enter to keep): ")
-        password = new or cur_pass
+        new_pass = getpass.getpass("  New password      (Enter to keep): ")
+        password = new_pass or cur_pass
     else:
         password = getpass.getpass("  Garmin password: ")
 
     if not email or not password:
         print("\n  No changes made.")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
-    env["GARMIN_EMAIL"]    = email
+    env["GARMIN_EMAIL"] = email
     env["GARMIN_PASSWORD"] = password
     save_env(env)
-    print("\n  Saved to .env")
-    input("\n  Press Enter to continue...")
+    console.print("\n  [green]✓[/]  Saved to .env")
+    _continue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Gmail MFA setup
 # ─────────────────────────────────────────────────────────────────────────────
 
-def setup_gmail_mfa():
+
+def setup_gmail_mfa() -> None:
     header("Gmail MFA Automation Setup")
     print("  When Garmin requires a security code (~every 30 days), this module")
     print("  polls your Gmail inbox and submits it automatically. Without it,")
@@ -452,7 +512,7 @@ def setup_gmail_mfa():
     creds_file = ROOT / "google_credentials.json"
     if not creds_file.exists():
         print()
-        print("  google_credentials.json not found.\n")
+        console.print("  [red]✗[/]  google_credentials.json not found.\n")
         print("  To create it:")
         print("    1. Go to console.cloud.google.com")
         print("    2. Create a project")
@@ -461,23 +521,24 @@ def setup_gmail_mfa():
         print("    5. Download JSON → save as google_credentials.json in this directory")
         print()
         print("  Then run this option again to complete authorization.")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
     print("  google_credentials.json found. Starting authorization flow...\n")
     result = subprocess.run([PYTHON, str(ROOT / "scripts" / "setup_gmail_auth.py")])
     if result.returncode == 0:
-        print("\n  Gmail MFA automation is now active.")
+        console.print("\n  [green]✓[/]  Gmail MFA automation is now active.")
     else:
-        print("\n  Setup did not complete — check the output above.")
-    input("\n  Press Enter to continue...")
+        console.print("\n  [red]✗[/]  Setup did not complete — check the output above.")
+    _continue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pull helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _parse_date(s):
+
+def _parse_date(s: str) -> str | None:
     """Accept YYYY-MM-DD, MM/DD/YYYY, MM/DD/YY, MM-DD-YYYY, MM-DD-YY."""
     for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%Y", "%m-%d-%y"):
         try:
@@ -487,69 +548,76 @@ def _parse_date(s):
     return None
 
 
-def _run_pull(start_date, days, no_skip=False):
+def _run_pull(start_date: str, days: int, no_skip: bool = False) -> None:
     """Run the Garmin puller, then immediately rebuild CSVs."""
-    cmd = [PYTHON, str(ROOT / "pullers" / "garmin.py"),
-           "--date", start_date, "--days", str(days)]
+    cmd = [
+        PYTHON,
+        str(ROOT / "pullers" / "garmin.py"),
+        "--date",
+        start_date,
+        "--days",
+        str(days),
+    ]
     if no_skip:
         cmd.append("--no-skip")
 
-    result = subprocess.run(cmd)
+    subprocess.run(cmd)
 
     print()
     print("  Building CSV reports...")
     subprocess.run([PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")])
     print()
-    print("  Done.")
-    print(f"  · reports/garmin_daily.csv")
-    print(f"  · reports/garmin_activities.csv")
+    console.print("  [green]✓[/]  Done.")
+    print("  · reports/garmin_daily.csv")
+    print("  · reports/garmin_activities.csv")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Pull data — sub-menu actions
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _pull_yesterday():
+
+def _pull_yesterday() -> None:
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     print(f"\n  Pulling {yesterday}...\n")
     _run_pull(yesterday, 1)
-    input("\n  Press Enter to continue...")
+    _continue()
 
 
-def _pull_last_n(n, label):
+def _pull_last_n(n: int, label: str) -> None:
     start = (date.today() - timedelta(days=n)).isoformat()
     print(f"\n  Pulling {label} ({start} → yesterday)...\n")
     _run_pull(start, n)
-    input("\n  Press Enter to continue...")
+    _continue()
 
 
-def _pull_custom():
+def _pull_custom() -> None:
     header("Custom Date Pull")
     print("  Accepted date formats: YYYY-MM-DD  |  MM/DD/YYYY  |  MM/DD/YY\n")
 
-    raw = input("  Start date: ").strip()
+    raw = prompt_with_navigation("  Start date: ")
     if not raw:
         return
     start = _parse_date(raw)
     if not start:
         print(f"\n  Could not parse '{raw}' as a date. Try: 2025-04-07 or 04/07/2025")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
-    days_in = input("  Number of days to pull [Enter for 1]: ").strip()
+    days_in = prompt_with_navigation("  Number of days to pull [Enter for 1]: ")
     days = int(days_in) if days_in.isdigit() and int(days_in) > 0 else 1
 
     end = (datetime.strptime(start, "%Y-%m-%d").date() + timedelta(days=days - 1)).isoformat()
     range_label = start if days == 1 else f"{start} → {end}"
     print(f"\n  Pulling {days} day(s): {range_label}")
 
-    reskip = input("  Re-pull dates that already have data? [y/N]: ").strip().lower()
+    reskip = prompt_with_navigation("  Re-pull dates that already have data? [y/N]: ")
     print()
-    _run_pull(start, days, no_skip=(reskip == "y"))
-    input("\n  Press Enter to continue...")
+    _run_pull(start, days, no_skip=(reskip.lower() == "y"))
+    _continue()
 
 
-def _pull_everything():
+def _pull_everything() -> None:
     header("Pull Full History")
     print("  Pulls every day from a start date through yesterday.")
     print("  Use this to build a complete data history via the live API.\n")
@@ -557,72 +625,76 @@ def _pull_everything():
     print("  · 1 month  ≈  7 minutes")
     print("  · 6 months ≈  45 minutes")
     print("  · 1 year   ≈  90 minutes\n")
-    print("  For very large history pulls, the Garmin bulk export (option 4)")
+    print("  For very large history pulls, the Garmin bulk export (option 6)")
     print("  is faster — request it from Garmin and import the .zip.\n")
     print("  Accepted date formats: YYYY-MM-DD  |  MM/DD/YYYY  |  MM/DD/YY\n")
 
-    raw = input("  Pull data starting from: ").strip()
+    raw = prompt_with_navigation("  Pull data starting from: ")
     if not raw:
         return
     start_str = _parse_date(raw)
     if not start_str:
         print(f"\n  Could not parse '{raw}'. Try: 2023-01-01 or 01/01/2023")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
-    start_dt  = datetime.strptime(start_str, "%Y-%m-%d").date()
+    start_dt = datetime.strptime(start_str, "%Y-%m-%d").date()
     yesterday = date.today() - timedelta(days=1)
-    days      = (yesterday - start_dt).days + 1
+    days = (yesterday - start_dt).days + 1
 
     if days <= 0:
         print("\n  Start date must be before today.")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
     mins = days * 15 // 60
-    time_est = (f"~{mins // 60}h {mins % 60}m" if mins >= 60 else f"~{mins} min") if mins else "< 1 min"
+    if mins:
+        time_est = f"~{mins // 60}h {mins % 60}m" if mins >= 60 else f"~{mins} min"
+    else:
+        time_est = "< 1 min"
 
     print(f"\n  {days} days  ({start_str} → {yesterday.isoformat()})")
     print(f"  Estimated time: {time_est}\n")
 
-    go = input("  Continue? [y/N]: ").strip().lower()
-    if go != "y":
+    go = prompt_with_navigation("  Continue? [y/N]: ")
+    if go.lower() != "y":
         print("  Cancelled.")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
-    reskip = input("  Skip dates that already have data? [Y/n]: ").strip().lower()
-    no_skip = (reskip == "n")
+    reskip = prompt_with_navigation("  Skip dates that already have data? [Y/n]: ")
+    no_skip = reskip.lower() == "n"
     print()
     _run_pull(start_str, days, no_skip=no_skip)
-    input("\n  Press Enter to continue...")
+    _continue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Import from Garmin bulk export
 # ─────────────────────────────────────────────────────────────────────────────
 
-def import_export():
+
+def import_export() -> None:
     header("Import from Garmin Bulk Export")
     print("  The Garmin bulk export is the fastest way to load years of")
     print("  historical data. Request it at:")
     print("  Garmin Connect → Profile → Account → Your Garmin Data")
     print("  (The .zip file arrives within 24–48 hours.)\n")
 
-    zip_path = input("  Path to export .zip: ").strip().strip('"').strip("'")
+    zip_path = prompt_with_navigation("  Path to export .zip: ").strip('"').strip("'")
     if not zip_path:
         print("  Cancelled.")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
     if not Path(zip_path).exists():
         print(f"\n  File not found: {zip_path}")
-        input("\n  Press Enter to continue...")
+        _continue()
         return
 
-    reskip = input("  Overwrite dates that already have data? [y/N]: ").strip().lower()
+    reskip = prompt_with_navigation("  Overwrite dates that already have data? [y/N]: ")
     cmd = [PYTHON, str(ROOT / "pullers" / "garmin_import_export.py"), zip_path]
-    if reskip == "y":
+    if reskip.lower() == "y":
         cmd.append("--no-skip")
 
     print()
@@ -632,142 +704,157 @@ def import_export():
     print("  Building CSV reports...")
     subprocess.run([PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")])
     print()
-    print("  Done.")
-    print(f"  · reports/garmin_daily.csv")
-    print(f"  · reports/garmin_activities.csv")
-    input("\n  Press Enter to continue...")
+    console.print("  [green]✓[/]  Done.")
+    print("  · reports/garmin_daily.csv")
+    print("  · reports/garmin_activities.csv")
+    _continue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Build CSV reports
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_csvs():
+
+def build_csvs() -> None:
     header("Build CSV Reports")
     print("  Flattens all JSON data files into:")
     print("  · reports/garmin_daily.csv       — one row per day")
     print("  · reports/garmin_activities.csv  — one row per workout\n")
 
-    since = input("  Include data from [Enter for all time, or YYYY-MM-DD]: ").strip()
-    cmd   = [PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")]
+    since = prompt_with_navigation("  Include data from [Enter for all time, or YYYY-MM-DD]: ")
+    cmd = [PYTHON, str(ROOT / "reports" / "build_garmin_csvs.py")]
     if since:
         cmd += ["--since", since]
 
     print()
     run(cmd)
-    input("\n  Press Enter to continue...")
+    _continue()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main menu
+# Menu rendering
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _first_run_notice():
+MenuAction = Callable[[], None] | None
+MenuOption = tuple[str, str, MenuAction]
+
+
+def _first_run_notice() -> None:
     if not ENV.exists():
-        print()
-        hr("═")
-        print("  garmin-extract")
-        hr("═")
-        print()
+        header("garmin-extract")
         print("  Looks like your first run — .env not found.")
         print()
         print("  Start with option 1 (Initial Setup) to get everything")
         print("  installed and configured before pulling data.")
-        input("\n  Press Enter to open the menu...")
+        _continue("\n  Press Enter to open the menu...")
 
 
-def _submenu(title, options):
-    """
-    Generic sub-menu loop.
-    options: list of (key, label, fn) — fn=None renders as a section header.
-    """
-    keys = {k: fn for k, label, fn in options if fn is not None}
+def _submenu(title: str, options: list[MenuOption]) -> None:
+    """Generic sub-menu loop. BackSignal from prompt exits; others propagate up."""
+    keys: dict[str, Callable[[], None]] = {k: fn for k, label, fn in options if fn is not None}
     while True:
-        print()
-        hr("─")
-        print(f"  {title}")
-        hr("─")
-        print()
+        header(title)
         for key, label, fn in options:
             if fn is None:
                 print(f"  {label}")
             else:
                 print(f"    {key}  {label}")
         print()
-        print("    b  Back")
-        print()
         hr()
-        choice = input("  Choice: ").strip().lower()
-        if choice == "b":
-            break
-        elif choice in keys:
-            keys[choice]()
+        print("    b  Back    x  Main menu    q  Quit")
+        hr()
+        try:
+            choice = prompt_with_navigation("\n  Choice: ").lower()
+        except BackSignal:
+            return
+        # ExitToMainSignal and QuitSignal propagate naturally
+
+        if choice in keys:
+            try:
+                keys[choice]()
+            except BackSignal:
+                pass  # stay in this submenu; action was aborted
+            # ExitToMainSignal and QuitSignal propagate
         else:
             print("  Unrecognized choice.")
 
 
-def menu_initial_setup():
-    _submenu("Initial Setup", [
-        ("1", "Setup wizard  (prerequisites + credentials)", check_prerequisites),
-        ("2", "Update Garmin credentials",                  configure_credentials),
-    ])
+def menu_initial_setup() -> None:
+    _submenu(
+        "Initial Setup",
+        [
+            ("1", "Setup wizard  (prerequisites + credentials)", check_prerequisites),
+            ("2", "Update Garmin credentials", configure_credentials),
+        ],
+    )
 
 
-def menu_pull_data():
-    _submenu("Pull Data", [
-        ("", "─── Recent ──────────────────────────────────────────", None),
-        ("1", "Yesterday",                                           _pull_yesterday),
-        ("2", "Last 7 days",                                         lambda: _pull_last_n(7,  "last 7 days")),
-        ("3", "Last 30 days",                                        lambda: _pull_last_n(30, "last 30 days")),
-        ("", "─── Custom ──────────────────────────────────────────", None),
-        ("4", "Specific date or date range",                         _pull_custom),
-        ("5", "Full history  (from a date you choose to today)",     _pull_everything),
-        ("", "─── Historical import ───────────────────────────────", None),
-        ("6", "Import from Garmin bulk export (.zip)",               import_export),
-        ("", "─── Reports ─────────────────────────────────────────", None),
-        ("7", "Rebuild CSV reports  (from existing pulled data)",    build_csvs),
-    ])
+def menu_pull_data() -> None:
+    _submenu(
+        "Pull Data",
+        [
+            ("", "─── Recent ──────────────────────────────────────────", None),
+            ("1", "Yesterday", _pull_yesterday),
+            ("2", "Last 7 days", lambda: _pull_last_n(7, "last 7 days")),
+            ("3", "Last 30 days", lambda: _pull_last_n(30, "last 30 days")),
+            ("", "─── Custom ──────────────────────────────────────────", None),
+            ("4", "Specific date or date range", _pull_custom),
+            ("5", "Full history  (from a date you choose to today)", _pull_everything),
+            ("", "─── Historical import ───────────────────────────────", None),
+            ("6", "Import from Garmin bulk export (.zip)", import_export),
+            ("", "─── Reports ─────────────────────────────────────────", None),
+            ("7", "Rebuild CSV reports  (from existing pulled data)", build_csvs),
+        ],
+    )
 
 
-def menu_automation():
-    _submenu("Configure Automation", [
-        ("", "─── Unattended MFA ─────────────────────────────────", None),
-        ("1", "Set up Gmail MFA  (auto-handle Garmin security codes)", setup_gmail_mfa),
-    ])
+def menu_automation() -> None:
+    _submenu(
+        "Configure Automation",
+        [
+            ("", "─── Unattended MFA ─────────────────────────────────", None),
+            ("1", "Set up Gmail MFA  (auto-handle Garmin security codes)", setup_gmail_mfa),
+        ],
+    )
 
 
-def main():
+def main() -> None:
     _first_run_notice()
 
-    actions = {
+    actions: dict[str, Callable[[], None]] = {
         "1": menu_initial_setup,
         "2": menu_pull_data,
         "3": menu_automation,
     }
 
     while True:
-        print()
-        hr("═")
-        print("  garmin-extract")
-        hr("═")
-        print()
+        header("garmin-extract")
         print("    1  Initial Setup")
         print("    2  Pull Data")
         print("    3  Configure Automation")
         print()
+        hr()
         print("    q  Quit")
-        print()
         hr()
 
-        choice = input("  Choice: ").strip().lower()
-
-        if choice == "q":
-            print()
+        try:
+            choice = prompt_with_navigation("\n  Choice: ").lower()
+        except (BackSignal, ExitToMainSignal):
+            continue  # no-op at main menu level
+        except QuitSignal:
             break
-        elif choice in actions:
-            actions[choice]()
+
+        if choice in actions:
+            try:
+                actions[choice]()
+            except ExitToMainSignal:
+                pass  # return to main menu loop
+            except QuitSignal:
+                break
         else:
             print("  Unrecognized choice.")
+
+    print()
 
 
 if __name__ == "__main__":

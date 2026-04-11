@@ -14,10 +14,10 @@ import sys
 import time
 from pathlib import Path
 
-ROOT             = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent
 CREDENTIALS_FILE = ROOT / "google_credentials.json"
-TOKEN_FILE       = ROOT / ".google_token.json"
-CODE_FILE        = ROOT / ".gmail_auth_code"
+TOKEN_FILE = ROOT / ".google_token.json"
+CODE_FILE = ROOT / ".gmail_auth_code"
 
 if not CREDENTIALS_FILE.exists():
     print(f"ERROR: {CREDENTIALS_FILE} not found.")
@@ -26,19 +26,19 @@ if not CREDENTIALS_FILE.exists():
 with open(CREDENTIALS_FILE) as f:
     creds_data = json.load(f)["installed"]
 
-CLIENT_ID     = creds_data["client_id"]
+CLIENT_ID = creds_data["client_id"]
 CLIENT_SECRET = creds_data["client_secret"]
-AUTH_URI      = creds_data["auth_uri"]
-TOKEN_URI     = creds_data["token_uri"]
-REDIRECT_URI  = "urn:ietf:wg:oauth:2.0:oob"
-SCOPES        = [
+AUTH_URI = creds_data["auth_uri"]
+TOKEN_URI = creds_data["token_uri"]
+REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
+SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-SCOPE         = " ".join(SCOPES)
+SCOPE = " ".join(SCOPES)
 
-from requests_oauthlib import OAuth2Session
+from requests_oauthlib import OAuth2Session  # noqa: E402
 
 oauth = OAuth2Session(CLIENT_ID, scope=SCOPE, redirect_uri=REDIRECT_URI)
 auth_url, state = oauth.authorization_url(
@@ -66,7 +66,8 @@ else:
     sys.exit(1)
 
 # Exchange code for tokens (no PKCE verifier needed)
-import os
+import os  # noqa: E402, I001
+
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # not needed but suppresses warnings
 
 token = oauth.fetch_token(
@@ -78,13 +79,13 @@ token = oauth.fetch_token(
 
 # Save in google-auth Credentials format
 token_data = {
-    "token":         token.get("access_token"),
+    "token": token.get("access_token"),
     "refresh_token": token.get("refresh_token"),
-    "token_uri":     TOKEN_URI,
-    "client_id":     CLIENT_ID,
+    "token_uri": TOKEN_URI,
+    "client_id": CLIENT_ID,
     "client_secret": CLIENT_SECRET,
-    "scopes":        SCOPES,
-    "expiry":        None,
+    "scopes": SCOPES,
+    "expiry": None,
 }
 TOKEN_FILE.write_text(json.dumps(token_data, indent=2))
 print(f"\nToken saved to {TOKEN_FILE}")

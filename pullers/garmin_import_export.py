@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-ROOT     = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "data" / "garmin"
 
 
@@ -107,10 +107,10 @@ def load_lifestyle(z: zipfile.ZipFile) -> dict:
                     continue
                 date = f"{cal[0]:04d}-{cal[1]:02d}-{cal[2]:02d}"
                 behaviour = entry.get("behaviourName", "").strip()
-                status    = entry.get("status")
+                status = entry.get("status")
                 # Sum amounts across sub-types (e.g. drinks count)
-                details   = entry.get("dailyLogDetailDTOList") or []
-                amount    = sum(d.get("amount", 0) for d in details) or None
+                details = entry.get("dailyLogDetailDTOList") or []
+                amount = sum(d.get("amount", 0) for d in details) or None
                 by_date[date][behaviour] = {"status": status, "amount": amount}
             break
     return dict(by_date)
@@ -141,8 +141,9 @@ def load_activities(z: zipfile.ZipFile) -> dict:
 def main():
     parser = argparse.ArgumentParser(description="Import Garmin export zip into data/garmin/")
     parser.add_argument("zip_path", help="Path to Garmin export .zip file")
-    parser.add_argument("--no-skip", action="store_true",
-                        help="Overwrite dates that already have a data file")
+    parser.add_argument(
+        "--no-skip", action="store_true", help="Overwrite dates that already have a data file"
+    )
     args = parser.parse_args()
 
     zip_path = Path(args.zip_path)
@@ -155,11 +156,11 @@ def main():
     print(f"Loading export: {zip_path.name}")
     with zipfile.ZipFile(zip_path) as z:
         print("  Loading daily summaries (UDS)...")
-        uds       = load_uds_files(z)
+        uds = load_uds_files(z)
         print(f"    {len(uds)} days")
 
         print("  Loading sleep data...")
-        sleep     = load_sleep_files(z)
+        sleep = load_sleep_files(z)
         print(f"    {len(sleep)} days")
 
         print("  Loading hydration data...")
@@ -167,7 +168,7 @@ def main():
         print(f"    {len(hydration)} days")
 
         print("  Loading biometrics...")
-        bio       = load_biometrics(z)
+        bio = load_biometrics(z)
         print(f"    {len(bio)} days")
 
         print("  Loading activities...")
@@ -192,16 +193,16 @@ def main():
             continue
 
         record = {
-            "stats":      uds.get(date),
-            "sleep":      sleep.get(date),
-            "hydration":  hydration.get(date),
+            "stats": uds.get(date),
+            "sleep": sleep.get(date),
+            "hydration": hydration.get(date),
             "biometrics": bio.get(date),
             "activities": activities.get(date, []),
-            "lifestyle":  lifestyle.get(date),
+            "lifestyle": lifestyle.get(date),
             "_meta": {
-                "date":       date,
-                "pulled_at":  datetime.utcnow().isoformat() + "Z",
-                "source":     "garmin-export",
+                "date": date,
+                "pulled_at": datetime.utcnow().isoformat() + "Z",
+                "source": "garmin-export",
             },
         }
 
