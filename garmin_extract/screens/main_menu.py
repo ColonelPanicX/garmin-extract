@@ -85,9 +85,9 @@ class MainMenuScreen(Screen[None]):
         self.app.push_screen(DataPullScreen())
 
     def action_go_automation(self) -> None:
-        from garmin_extract.screens.stub import StubScreen
+        from garmin_extract.screens.automation import AutomationScreen
 
-        self.app.push_screen(StubScreen("Automation", "Phase 4"))
+        self.app.push_screen(AutomationScreen())
 
     def action_quit(self) -> None:
         self.app.exit()
