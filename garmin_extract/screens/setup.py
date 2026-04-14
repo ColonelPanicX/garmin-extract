@@ -645,7 +645,7 @@ class _GmailCodeModal(ModalScreen[None]):
     }
 
     #gmail-code-box {
-        width: 58;
+        width: 90;
         height: auto;
         border: round $accent;
         padding: 1 2;
@@ -653,6 +653,16 @@ class _GmailCodeModal(ModalScreen[None]):
 
     #gmail-code-title {
         text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+    }
+
+    #gmail-code-url-label {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #gmail-code-url {
         color: $accent;
         margin-bottom: 1;
     }
@@ -668,11 +678,18 @@ class _GmailCodeModal(ModalScreen[None]):
     }
     """
 
+    def __init__(self, auth_url: str = "") -> None:
+        super().__init__()
+        self._auth_url = auth_url
+
     def compose(self) -> ComposeResult:
         with Static(id="gmail-code-box"):
             yield Static("Paste Authorization Code", id="gmail-code-title")
+            if self._auth_url:
+                yield Static("Open this URL in any browser:", id="gmail-code-url-label")
+                yield Static(self._auth_url, id="gmail-code-url")
             yield Static(
-                "Copy the code from the browser page and paste it below.",
+                "After authorizing, paste the code below:",
                 id="gmail-code-hint",
             )
             yield Input(placeholder="Paste code here", id="gmail-code-input")
@@ -722,6 +739,7 @@ class GmailSetupScreen(Screen[None]):
         super().__init__()
         self._done = False
         self._code_shown = False
+        self._auth_url = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -789,21 +807,22 @@ class GmailSetupScreen(Screen[None]):
                 line = raw_line.rstrip("\n")
                 self.app.call_from_thread(log.write, line)
 
-                # Auth URL detected — highlight it
+                # Auth URL detected — capture it
                 if line.startswith("https://") and not self._code_shown:
+                    self._auth_url = line.strip()
                     self.app.call_from_thread(
                         self.query_one("#gmail-status", Static).update,
-                        "Open the URL above in any browser, then paste the code",
+                        "Open the URL in any browser, then paste the code into the dialog",
                     )
 
-                # Waiting for code file — show modal
+                # Waiting for code file — show modal with URL embedded
                 if "Waiting up to" in line and not self._code_shown:
                     self._code_shown = True
                     self.app.call_from_thread(
                         self.query_one("#gmail-status", Static).update,
                         "Waiting for authorization code…",
                     )
-                    self.app.call_from_thread(self.app.push_screen, _GmailCodeModal())
+                    self.app.call_from_thread(self.app.push_screen, _GmailCodeModal(self._auth_url))
 
             proc.wait()
             self._done = True
