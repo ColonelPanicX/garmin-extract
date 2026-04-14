@@ -423,7 +423,96 @@ def build_metrics(sb, d: date, display_name: str, uuid: str = "") -> list:
         ("fitness_age", f"/fitnessage-service/fitnessage/{cdate}", {}),
         ("hydration", f"/usersummary-service/usersummary/hydration/daily/{cdate}", {}),
         ("lifestyle", f"/lifestylelogging-service/dailyLog/{cdate}", {}),
+        # Nutrition
+        ("nutrition_food_log", f"/nutrition-service/food/logs/{cdate}", {}),
+        ("nutrition_meals", f"/nutrition-service/meals/{cdate}", {}),
+        # Reproductive health (empty for users without data — handled gracefully)
+        ("menstrual_cycle", f"/periodichealth-service/menstrualcycle/dayview/{cdate}", {}),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Per-activity detail metrics
+# ---------------------------------------------------------------------------
+
+
+def build_activity_metrics(activity_id: str) -> list:
+    """Return per-activity detail endpoints for a single activity ID."""
+    base = f"/activity-service/activity/{activity_id}"
+    return [
+        (f"activity_{activity_id}_detail", base, {}),
+        (f"activity_{activity_id}_splits", f"{base}/splits", {}),
+        (f"activity_{activity_id}_typed_splits", f"{base}/typedsplits", {}),
+        (f"activity_{activity_id}_split_summaries", f"{base}/split_summaries", {}),
+        (f"activity_{activity_id}_hr_timezones", f"{base}/hrTimeInZones", {}),
+        (f"activity_{activity_id}_power_timezones", f"{base}/powerTimeInZones", {}),
+        (f"activity_{activity_id}_exercise_sets", f"{base}/exerciseSets", {}),
+        (f"activity_{activity_id}_weather", f"{base}/weather", {}),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Static / profile metrics (pulled once per session, not per date)
+# ---------------------------------------------------------------------------
+
+
+def build_profile_metrics(display_name: str, user_profile_number: str = "") -> list:
+    """Return static endpoints that don't change per date."""
+    metrics = [
+        ("user_profile", "/userprofile-service/userprofile/user-settings", {}),
+        ("devices", "/device-service/deviceregistration/devices", {}),
+        ("primary_training_device", "/web-gateway/device-info/primary-training-device", {}),
+        (
+            "personal_records",
+            f"/personalrecord-service/personalrecord/prs/{display_name}",
+            {},
+        ),
+        ("training_plans", "/trainingplan-service/trainingplan/plans", {}),
+        ("workouts", "/workout-service/workouts", {"start": 0, "limit": 100}),
+    ]
+    if user_profile_number:
+        metrics.append(
+            ("gear", "/gear-service/gear/filterGear", {"userProfilePk": user_profile_number})
+        )
+    else:
+        metrics.append(("gear", "/gear-service/gear/filterGear", {}))
+    return metrics
+
+
+def pull_profile_data(sb, display_name: str) -> None:
+    """Pull static profile/device/gear data once per session and save to profile.json."""
+    # First pull user_profile to try to get the profile number for gear
+    user_profile_number = ""
+    try:
+        result = browser_fetch(sb, "/userprofile-service/userprofile/user-settings", None)
+        if result.get("ok") and result.get("data"):
+            data = result["data"]
+            user_profile_number = str(
+                data.get("userProfileNumber") or data.get("id") or data.get("profileId") or ""
+            )
+    except Exception:
+        pass
+
+    metrics = build_profile_metrics(display_name, user_profile_number)
+    print(f"Profile data: Pulling {len(metrics)} items...")
+    pad = max(len(name) for name, _, _ in metrics)
+    results: dict = {}
+
+    for name, path, params in metrics:
+        try:
+            result = browser_fetch(sb, path, params or None)
+            results[name] = result.get("data") if result.get("ok") else result
+            status = "✓" if result.get("ok") else f"✗ HTTP {result.get('status')}"
+        except Exception as e:
+            results[name] = {"_error": str(e)}
+            status = f"✗ {e}"
+        print(f"    {status:<4} {name:<{pad}}")
+
+    out_path = DATA_DIR / "profile.json"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+    print(f"  → {out_path}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +535,45 @@ def pull_date(sb, d: date, display_name: str, uuid: str = "") -> dict:
             status = f"✗ {e}"
         print(f"    {status:<4} {name:<{pad}}")
 
+    # Per-activity detail: iterate over activity IDs from the activities response
+    activity_ids = _extract_activity_ids(results.get("activities"))
+    if activity_ids:
+        n = len(activity_ids)
+        print(f"    Fetching detail for {n} activit{'y' if n == 1 else 'ies'}...")
+        for aid in activity_ids:
+            for det_name, det_path, det_params in build_activity_metrics(str(aid)):
+                try:
+                    det_result = browser_fetch(sb, det_path, det_params or None)
+                    results[det_name] = (
+                        det_result.get("data") if det_result.get("ok") else det_result
+                    )
+                    status = "✓" if det_result.get("ok") else f"✗ HTTP {det_result.get('status')}"
+                except Exception as e:
+                    results[det_name] = {"_error": str(e)}
+                    status = f"✗ {e}"
+                print(f"    {status:<4} {det_name:<{pad}}")
+
     return results
+
+
+def _extract_activity_ids(activities_data) -> list:
+    """Extract activity IDs from the activities API response."""
+    if not activities_data:
+        return []
+    # Response is either a list of activity objects or a dict with a list inside
+    if isinstance(activities_data, list):
+        items = activities_data
+    elif isinstance(activities_data, dict):
+        items = activities_data.get("activityList") or activities_data.get("activities") or []
+    else:
+        return []
+    ids = []
+    for item in items:
+        if isinstance(item, dict):
+            aid = item.get("activityId") or item.get("id")
+            if aid:
+                ids.append(str(aid))
+    return ids
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +639,8 @@ def main():
                 print("ERROR: Could not retrieve display name — login may have failed.")
                 sys.exit(1)
             print(f"Logged in as: {display_name} (uuid={uuid or 'unknown'})\n")
+
+            pull_profile_data(sb, display_name)
 
             for d in dates:
                 out_path = DATA_DIR / f"{d.isoformat()}.json"
