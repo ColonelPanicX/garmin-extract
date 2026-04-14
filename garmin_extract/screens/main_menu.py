@@ -75,9 +75,9 @@ class MainMenuScreen(Screen[None]):
         yield Footer()
 
     def action_go_setup(self) -> None:
-        from garmin_extract.screens.stub import StubScreen
+        from garmin_extract.screens.setup import SetupScreen
 
-        self.app.push_screen(StubScreen("Initial Setup", "Phase 3"))
+        self.app.push_screen(SetupScreen())
 
     def action_go_pull(self) -> None:
         from garmin_extract.screens.data_pull import DataPullScreen
