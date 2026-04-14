@@ -1,6 +1,6 @@
 # garmin-extract
 
-Pull 25 daily health metrics from Garmin Connect automatically — including on headless servers where every other Garmin library gets blocked by Cloudflare.
+Pull 30+ daily health metrics from Garmin Connect automatically — including on headless servers where every other Garmin library gets blocked by Cloudflare.
 
 ## Why this exists
 
@@ -12,15 +12,18 @@ Once logged in, Chrome saves the session to a local browser profile and reuses i
 
 ## Features
 
-- **25 daily health metrics** pulled from the Garmin Connect SPA's live API endpoints
+- **Interactive TUI** — a full terminal interface that walks you through setup, data pulls, and automation without touching the command line
+- **30+ metrics per day** — steps, heart rate, sleep, HRV, stress, body battery, SpO2, respiration, training readiness, nutrition, activities, and more
+- **Per-activity detail** — 8 additional endpoints per workout (splits, HR zones, power zones, exercise sets, weather, and more)
+- **One-time profile pull** — devices, personal records, training plans, and gear saved to `profile.json`
 - **Historical backfill** from Garmin's bulk data export (`.zip` file)
 - **CSV export** — `garmin_daily.csv` (daily metrics) and `garmin_activities.csv` (per-workout)
 - Partial failures are non-fatal — the daily file is written with whatever succeeded
 - Idempotent — safe to run multiple times; already-pulled dates are skipped by default
 
-**Optional automation features** (see [Configure Automation](#configure-automation)):
+**Optional automation:**
 - Fully automatic MFA via Gmail API — the tool reads your Garmin security code from Gmail so session renewals require no human action
-- Cron / Task Scheduler setup for daily unattended pulls
+- Scheduled daily pulls configured from inside the TUI
 
 ## Requirements
 
@@ -41,7 +44,6 @@ wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key ad
 echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \
     | sudo tee /etc/apt/sources.list.d/google-chrome.list
 sudo apt update && sudo apt install -y google-chrome-stable
-sudo apt --fix-broken install -y
 ```
 
 **Headless Linux only** — also install Xvfb:
@@ -56,57 +58,75 @@ sudo apt install -y xvfb
 ```bash
 git clone https://github.com/ColonelPanicX/garmin-extract.git
 cd garmin-extract
+```
 
+**With [uv](https://docs.astral.sh/uv/) (recommended):**
+```bash
+uv sync
+uv run python -m garmin_extract
+```
+
+**With pip:**
+```bash
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e .
+python -m garmin_extract
 ```
 
-### 3. Run the interactive menu
+### 3. Follow the TUI
 
-```bash
-python garmin_extract.py
-```
-
-On first run (no `.env` present), you'll see:
+The interactive TUI is the recommended way to get started. On launch you'll land on the main menu:
 
 ```
-  Looks like your first run — .env not found.
+  garmin-extract  v1.1.0
+  Automated Garmin Connect data pipeline
 
-  Suggested setup order:
-    1  Check prerequisites
-    2  Configure Garmin credentials
-    3  Set up Gmail MFA  (recommended)
-    4  Pull your first day of data
+  ┌─────────────────────────────────────────────────────┐
+  │   [1]  Initial Setup                                │
+  │   [2]  Pull Data                                    │
+  │   [3]  Automation                                   │
+  └─────────────────────────────────────────────────────┘
 ```
 
-Run **1** to verify your environment, **2** to enter your Garmin credentials, **3** to configure Gmail MFA (optional but recommended for unattended pulls), then **4** to pull data.
+**First-time setup order:**
 
-On the first pull, Chrome launches, logs in to Garmin, handles MFA, and saves a persistent browser session to `.garmin_browser_profile/`. Subsequent runs reuse that session and skip login entirely. Output is written to `data/garmin/YYYY-MM-DD.json`.
+1. **Initial Setup → Prerequisites** — verifies Chrome, Xvfb (Linux), Python version, and packages. Installs missing prerequisites on Linux.
+2. **Initial Setup → Garmin Credentials** — enter your Garmin email and password. Saved to `.env`.
+3. **Initial Setup → Gmail OAuth** *(optional but recommended)* — authorizes the Gmail API so MFA codes are fetched automatically. See [Gmail MFA automation](#gmail-mfa-automation).
+4. **Pull Data** — choose a date range and pull. On the first pull, Chrome launches, logs in, handles MFA, and saves a session to `.garmin_browser_profile/`. Subsequent runs reuse that session.
 
-### 4. Automate daily pulls
+### 4. Schedule automatic pulls *(optional)*
 
-**Linux / macOS (cron):**
-```cron
+From the main menu, go to **Automation → Scheduled Pulls**. Press `i` to enable a daily pull at 6:00 AM (default), or `e` to choose a different hour. Output is logged to `/tmp/garmin-pull.log`.
+
+Alternatively, add the shell wrapper directly to your crontab:
+```
 0 6 * * * /path/to/garmin-extract/scripts/pull-garmin.sh
 ```
-The shell wrapper auto-detects its own location — no hardcoded paths. Logs go to `/tmp/garmin-pull.log`.
-
-**Windows:** Use Task Scheduler to run `python pullers\garmin.py` at your preferred time.
 
 ## Usage
 
-The interactive menu (`python garmin_extract.py`) is the recommended way to pull data — it covers all workflows below and auto-builds CSVs after every pull.
-
-### Daily puller (CLI / scripting)
-
-For automation or scripting, the puller can be invoked directly:
+### TUI
 
 ```bash
-python pullers/garmin.py                          # yesterday (default)
-python pullers/garmin.py --date 2026-03-01        # specific date
-python pullers/garmin.py --date 2026-03-01 --days 30  # 30-day range from date
-python pullers/garmin.py --no-skip                # re-pull dates that already exist
+uv run python -m garmin_extract      # recommended
+python garmin_extract.py             # alternate shim
+```
+
+### CLI (scripting / headless)
+
+```bash
+uv run python -m garmin_extract --no-tui   # print menu, no TUI
+```
+
+### Daily puller (direct)
+
+```bash
+python pullers/garmin.py                               # yesterday (default)
+python pullers/garmin.py --date 2026-03-01             # specific date
+python pullers/garmin.py --date 2026-03-01 --days 30   # 30-day range
+python pullers/garmin.py --no-skip                     # re-pull existing dates
 ```
 
 ### Historical backfill
@@ -115,10 +135,10 @@ Request your data export from **Garmin Connect → Profile → Account → Your 
 
 ```bash
 python pullers/garmin_import_export.py path/to/export.zip
-python pullers/garmin_import_export.py path/to/export.zip --no-skip  # overwrite existing
+python pullers/garmin_import_export.py path/to/export.zip --no-skip
 ```
 
-This reads six data categories from the zip and writes one JSON file per day. Skips dates that already have a live-pulled file (which contain richer data).
+Reads six data categories from the zip and writes one JSON file per day. Skips dates that already have a live-pulled file (which contain richer data).
 
 ### CSV export
 
@@ -128,38 +148,33 @@ python reports/build_garmin_csvs.py --since 2025-01-01
 ```
 
 Outputs:
-- `reports/garmin_daily.csv` — one row per day (steps, HR, sleep, stress, HRV, body battery, SpO2, training, lifestyle logging, and more)
+- `reports/garmin_daily.csv` — one row per day (steps, HR, sleep, stress, HRV, body battery, SpO2, training load, nutrition, lifestyle logging, and more)
 - `reports/garmin_activities.csv` — one row per workout (name, type, duration, distance, HR, power, etc.)
-
-The script handles both live-pull and export-import JSON formats transparently.
 
 ## Gmail MFA automation
 
 When Garmin requires an MFA code (approximately every 30 days), this module polls your Gmail inbox automatically, finds the security code email, and submits the code to the browser — no human required.
 
-### Setup
+### Setup via TUI
 
-**Step 1:** Create a Google Cloud project and OAuth 2.0 credentials:
+Go to **Initial Setup → Gmail OAuth** and follow the on-screen steps:
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a new project
-3. Enable the **Gmail API**
-4. Go to **Credentials** → **Create Credentials** → **OAuth 2.0 Client ID** → **Desktop app**
-5. Download the JSON file and save it as `google_credentials.json` in the project root
+1. Place your `google_credentials.json` (downloaded from Google Cloud Console) in the project root
+2. Select **Authorize Gmail** — an authorization URL is displayed inside the dialog
+3. Open the URL in any browser (does not need to be on the same machine), authorize, and paste the code back
+4. Done — a token is saved to `.google_token.json` and does not expire unless revoked
 
-**Step 2:** Run the one-time auth setup:
+**To create credentials:** Go to [console.cloud.google.com](https://console.cloud.google.com) → New project → Enable Gmail API → Credentials → OAuth 2.0 Client ID → Desktop app → Download JSON.
+
+### Setup via CLI
 
 ```bash
 python scripts/setup_gmail_auth.py
 ```
 
-This prints a Google authorization URL. Open it in any browser (does not need to be on the same machine), authorize the requested scopes, then paste the resulting code back when prompted. A token is saved to `.google_token.json`.
-
-**Step 3:** Done. The token contains a refresh token that does not expire unless explicitly revoked.
-
 ### Fallback
 
-If Gmail automation is not configured (or fails), the pipeline falls back to a file-based method:
+If Gmail automation is not configured (or fails), the TUI shows an MFA dialog prompting you to enter the code manually. At the CLI, the pipeline prints:
 
 ```
 MFA REQUIRED — check your email
@@ -167,13 +182,15 @@ Run: echo YOUR_CODE > /path/to/.mfa_code
 Waiting up to 5 minutes...
 ```
 
-Write the code to the file and the pipeline continues.
+### Verify status
+
+Go to **Automation → Gmail MFA** to see whether the automation is active, partial, or unconfigured — and what to do if something is wrong.
 
 ## Data output
 
 ### JSON format
 
-Each pull writes `data/garmin/YYYY-MM-DD.json` containing all 25 metrics as top-level keys, plus a `_meta` block:
+Each pull writes `data/garmin/YYYY-MM-DD.json` containing all metrics as top-level keys, plus a `_meta` block:
 
 ```json
 {
@@ -197,7 +214,7 @@ Failed metrics are recorded inline rather than aborting the pull:
 { "training_readiness": { "ok": false, "status": 404, "data": null } }
 ```
 
-### Metrics pulled
+### Metrics pulled (per date)
 
 | Key | Description |
 |---|---|
@@ -214,17 +231,44 @@ Failed metrics are recorded inline rather than aborting the pull:
 | `training_status` | Training load balance, VO2Max trend, status label |
 | `fitness_age` | Calculated fitness age vs. chronological age |
 | `hydration` | Daily hydration intake vs. goal |
+| `nutrition_food_log` | Food log entries for the day |
+| `nutrition_meals` | Meal-level nutrition summary |
+| `menstrual_cycle` | Menstrual cycle tracking data |
 | `lifestyle` | Lifestyle behavior logging (alcohol, caffeine, sleep aids, etc.) |
-| ...and 11 more | Steps, floors, intensity minutes, resting HR, body composition, blood pressure, etc. |
+| ...and more | Steps, floors, intensity minutes, resting HR, body composition, blood pressure, etc. |
+
+**Per-activity detail** (pulled for each logged workout): splits, typed splits, split summaries, HR time in zones, power time in zones, exercise sets, weather.
+
+**One-time profile pull** (per session): devices, user profile, personal records, training plans, workouts, gear → `data/garmin/profile.json`.
 
 ## Known limitations
 
-- Tested on **Ubuntu 24.04**. Windows and macOS are supported but less tested. On headless Linux, Xvfb is required and detected automatically.
+- Tested on **Ubuntu 24.04**. Windows and macOS are supported but less tested.
 - Requires a Garmin account with **email MFA enabled** (this is standard on all accounts).
 - The API endpoints are **reverse-engineered from the Garmin Connect SPA**. They may change with Garmin app updates. If metrics start returning 404/empty responses, the endpoints may need to be re-mapped using Chrome DevTools → Network tab.
-- The `garminconnect` Python library (cyberjunky) added a new mobile SSO OAuth flow in April 2026. If it can bypass Cloudflare without a real browser, it could replace the entire Xvfb/Chrome/SeleniumBase stack. This is under evaluation — the browser-based approach remains production until confirmed.
+- Google Drive / Sheets export is not yet implemented (planned for a future release).
 
 ## Changelog
+
+### v1.1.0 — 2026-04-14 — Full TUI, expanded API, setup wizard, automation
+
+**Full Textual TUI** replacing the print menu as the primary interface:
+- `MainMenuScreen` → `DataPullScreen` → `PullProgressScreen` with live per-metric or per-day progress depending on date range
+- MFA modal inside the TUI — prompts for a code when Gmail automation is not available
+- `Initial Setup` screen with prerequisite checks, Garmin credential management, and Gmail OAuth wizard (including in-dialog URL display for headless environments)
+- `Automation` screen with Gmail MFA status view and `Scheduled Pulls` manager (enable, disable, change pull time)
+
+**Expanded Garmin API coverage:**
+- Added nutrition (food log, meals), menstrual cycle tracking
+- Per-activity detail: 8 endpoints per logged workout (splits, HR/power zones, exercise sets, weather)
+- One-time profile pull per session: devices, personal records, training plans, workouts, gear → `profile.json`
+
+**Bug fixes:**
+- Fixed Python output buffering (`-u` flag) that caused subprocess output to stall in the TUI
+- Fixed `call_from_thread` usage in Textual screen workers
+- Fixed Gmail MFA CSS hex color false-match (`#000000` no longer matched as a security code)
+
+---
 
 ### 2026-04-09 — CSV normalization and lifestyle logging fix
 
@@ -233,6 +277,8 @@ Failed metrics are recorded inline rather than aborting the pull:
 **Lifestyle logging fix:** The lifestyle behavior extraction was reading from the wrong part of the JSON structure and silently producing empty columns. It now correctly reads from `lifestyle.dailyLogsReport[]`. Logged behaviors appear as `Yes`/`No` per day; behaviors not logged on a given day show `N/A`. Quantity-tracked behaviors (e.g. Alcohol) also get an `(amount)` column with the summed value. Behavior columns are discovered dynamically from the user's actual data — no behavior names are hardcoded.
 
 **Sleep timestamps:** `Sleep Start (UTC)` and `Sleep End (UTC)` were previously stored as raw millisecond epoch values. They are now converted to ISO 8601 strings (`YYYY-MM-DDTHH:MM:SSZ`).
+
+---
 
 ### 2026-04-08 — Gmail MFA false-match and re-submission loop fixes
 
