@@ -229,16 +229,18 @@ class PullProgressScreen(Screen[None]):
 
     def _build_cmd(self) -> list[str]:
         if self._rebuild_only:
-            return [sys.executable, str(ROOT / "reports" / "build_garmin_csvs.py")]
+            return [sys.executable, "-u", str(ROOT / "reports" / "build_garmin_csvs.py")]
         if self._zip_path:
             return [
                 sys.executable,
+                "-u",
                 str(ROOT / "pullers" / "garmin_import_export.py"),
                 "--zip",
                 self._zip_path,
             ]
         cmd = [
             sys.executable,
+            "-u",
             str(ROOT / "pullers" / "garmin.py"),
             "--date",
             self._start_date,

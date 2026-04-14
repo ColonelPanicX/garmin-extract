@@ -777,7 +777,7 @@ class GmailSetupScreen(Screen[None]):
 
         try:
             proc = subprocess.Popen(
-                [sys.executable, str(ROOT / "scripts" / "setup_gmail_auth.py")],
+                [sys.executable, "-u", str(ROOT / "scripts" / "setup_gmail_auth.py")],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
