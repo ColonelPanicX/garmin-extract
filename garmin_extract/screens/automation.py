@@ -397,9 +397,9 @@ class CronScreen(Screen[None]):
     """Cron schedule management screen."""
 
     BINDINGS = [
-        Binding("i", "install", "Install", show=True),
-        Binding("r", "remove", "Remove", show=False),
-        Binding("e", "edit_time", "Edit Time", show=False),
+        Binding("i", "install", "Install / Reinstall", show=True),
+        Binding("e", "edit_time", "Edit Time", show=True),
+        Binding("r", "remove", "Remove", show=True),
         Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -452,7 +452,7 @@ class CronScreen(Screen[None]):
         self._refresh_cron_display()
 
     def _refresh_cron_display(self) -> None:
-        self.run_worker(self._check_cron, thread=True, name="cron-check")
+        self.run_worker(self._check_cron, thread=True, exclusive=True)
 
     def _check_cron(self) -> None:
         crontab = _read_crontab()
@@ -480,15 +480,6 @@ class CronScreen(Screen[None]):
             self.query_one("#cron-status", Static).update("[dim]Not installed[/]")
             self.query_one("#cron-entry", Static).update("[dim]Default: 06:00 daily[/]")
 
-        self.BINDINGS = [
-            Binding("i", "install", "Reinstall" if installed else "Install", show=True),
-            Binding("r", "remove", "Remove", show=installed),
-            Binding("e", "edit_time", "Edit Time", show=installed),
-            Binding("b", "back", "Back", show=True),
-            Binding("q", "quit", "Quit", show=True),
-        ]
-        self.refresh_bindings()
-
     def action_install(self) -> None:
         ok, _ = _install_cron(self._current_hour)
         feedback = (
@@ -501,6 +492,9 @@ class CronScreen(Screen[None]):
 
     def action_remove(self) -> None:
         if not self._installed:
+            self.query_one("#cron-feedback", Static).update(
+                "[dim]Nothing to remove — not installed.[/]"
+            )
             return
         ok, _ = _remove_cron()
         feedback = (
@@ -513,6 +507,9 @@ class CronScreen(Screen[None]):
 
     def action_edit_time(self) -> None:
         if not self._installed:
+            self.query_one("#cron-feedback", Static).update(
+                "[dim]Install first, then use  e  to change the time.[/]"
+            )
             return
         self.app.push_screen(_EditTimeModal(self._current_hour), self._on_hour_selected)
 
