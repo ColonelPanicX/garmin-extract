@@ -23,8 +23,8 @@ _MENU = """\
   │   [1]  Gmail MFA                                    │
   │        View automation status                       │
   │                                                     │
-  │   [2]  Cron Schedule                                │
-  │        Install or configure daily pull              │
+  │   [2]  Scheduled Pulls                              │
+  │        Set up automatic daily data pull             │
   │                                                     │
   │   [3]  Google Drive / Sheets                        │
   │        Export to Google services                    │
@@ -397,9 +397,9 @@ class CronScreen(Screen[None]):
     """Cron schedule management screen."""
 
     BINDINGS = [
-        Binding("i", "install", "Install / Reinstall", show=True),
-        Binding("e", "edit_time", "Edit Time", show=True),
-        Binding("r", "remove", "Remove", show=True),
+        Binding("i", "install", "Enable / Re-enable", show=True),
+        Binding("e", "edit_time", "Change Time", show=True),
+        Binding("r", "remove", "Disable", show=True),
         Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -439,8 +439,8 @@ class CronScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield Static("Cron Schedule", id="cron-header")
-        yield Static("Checking crontab…", id="cron-status")
+        yield Static("Scheduled Pulls", id="cron-header")
+        yield Static("Checking schedule…", id="cron-status")
         yield Static("", id="cron-entry")
         yield Static("", id="cron-feedback")
         yield Footer()
@@ -473,19 +473,21 @@ class CronScreen(Screen[None]):
 
         if installed:
             self.query_one("#cron-status", Static).update(
-                f"[green]● Installed[/]  —  runs daily at [bold]{hour:02d}:00[/]"
+                f"[green]● Active[/]  —  pulls data every day at [bold]{hour:02d}:00[/]"
             )
-            self.query_one("#cron-entry", Static).update(f"[dim]{entry}[/]")
+            self.query_one("#cron-entry", Static).update(
+                "[dim]Output is logged to  /tmp/garmin-pull.log[/]"
+            )
         else:
-            self.query_one("#cron-status", Static).update("[dim]Not installed[/]")
-            self.query_one("#cron-entry", Static).update("[dim]Default: 06:00 daily[/]")
+            self.query_one("#cron-status", Static).update("[dim]Not scheduled[/]")
+            self.query_one("#cron-entry", Static).update("[dim]Default pull time: 6:00 AM daily[/]")
 
     def action_install(self) -> None:
         ok, _ = _install_cron(self._current_hour)
         feedback = (
-            f"[green]Installed — runs daily at {self._current_hour:02d}:00[/]"
+            f"[green]Scheduled — will pull data every day at {self._current_hour:02d}:00[/]"
             if ok
-            else "[red]Failed to install — check crontab permissions[/]"
+            else "[red]Failed to save schedule — check system permissions[/]"
         )
         self.query_one("#cron-feedback", Static).update(feedback)
         self._refresh_cron_display()
@@ -493,14 +495,14 @@ class CronScreen(Screen[None]):
     def action_remove(self) -> None:
         if not self._installed:
             self.query_one("#cron-feedback", Static).update(
-                "[dim]Nothing to remove — not installed.[/]"
+                "[dim]No schedule is set — nothing to disable.[/]"
             )
             return
         ok, _ = _remove_cron()
         feedback = (
-            "[dim]Cron entry removed.[/]"
+            "[dim]Schedule disabled — automatic pulls are turned off.[/]"
             if ok
-            else "[red]Failed to remove — check crontab permissions[/]"
+            else "[red]Failed to remove schedule — check system permissions[/]"
         )
         self.query_one("#cron-feedback", Static).update(feedback)
         self._refresh_cron_display()
@@ -508,7 +510,7 @@ class CronScreen(Screen[None]):
     def action_edit_time(self) -> None:
         if not self._installed:
             self.query_one("#cron-feedback", Static).update(
-                "[dim]Install first, then use  e  to change the time.[/]"
+                "[dim]Enable a schedule first, then use  e  to change the time.[/]"
             )
             return
         self.app.push_screen(_EditTimeModal(self._current_hour), self._on_hour_selected)
@@ -518,9 +520,9 @@ class CronScreen(Screen[None]):
             return
         ok, _ = _install_cron(hour)
         feedback = (
-            f"[green]Updated — runs daily at {hour:02d}:00[/]"
+            f"[green]Updated — will pull data every day at {hour:02d}:00[/]"
             if ok
-            else "[red]Failed to update — check crontab permissions[/]"
+            else "[red]Failed to update schedule — check system permissions[/]"
         )
         self.query_one("#cron-feedback", Static).update(feedback)
         self._refresh_cron_display()
