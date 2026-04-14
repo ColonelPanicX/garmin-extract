@@ -60,7 +60,7 @@ def start_xvfb(display=":99"):
 
 
 # ---------------------------------------------------------------------------
-# MFA handoff (file-based, works without interactive stdin)
+# MFA handoff
 # ---------------------------------------------------------------------------
 
 
@@ -79,10 +79,19 @@ def wait_for_mfa() -> str:
     except ImportError:
         pass
 
-    # Manual file-based fallback
+    # Interactive fallback — prompt inline when stdin is a terminal
+    print()
+    print("MFA REQUIRED — check your email for the 6-digit code.")
+    if sys.stdin.isatty():
+        while True:
+            code = input("  Enter code: ").strip()
+            if code:
+                return code
+            print("  No code entered — please try again.")
+
+    # Non-interactive fallback (cron / piped stdin) — poll a file
     MFA_FILE.unlink(missing_ok=True)
     print("=" * 50)
-    print("MFA REQUIRED — check your email")
     print(f"Run: echo YOUR_CODE > {MFA_FILE}")
     print("Waiting up to 5 minutes...")
     print("=" * 50)
