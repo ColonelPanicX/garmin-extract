@@ -14,7 +14,10 @@ Automated Garmin Connect data pipeline — bypasses Cloudflare via real Chrome b
 
 | Command | Purpose |
 |---------|---------|
-| `uv run python garmin_extract.py` | Interactive menu (primary entry point) |
+| `uv run python -m garmin_extract` | TUI (default) |
+| `uv run python -m garmin_extract --no-tui` | Print menu (headless / cron) |
+| `uv run python garmin_extract.py` | Shim — calls the package (backward compat) |
+| `garmin-extract` | Installed script (`uv pip install -e .`) |
 | `python pullers/garmin.py --date YYYY-MM-DD --days N` | Direct data pull |
 | `python reports/build_garmin_csvs.py` | Rebuild CSV reports |
 | `scripts/pull-garmin.sh` | Cron wrapper (pull + rebuild CSVs) |
@@ -40,7 +43,11 @@ uv run python garmin_extract.py
 
 ## Build Phase
 
-Currently **Phase 1** (standalone script with print menu). Package restructure (`garmin_extract/` + `__main__.py`) is a Phase 2 prep item.
+Currently **Phase 1** (package scaffold + print menu + Textual TUI stub).
+- `garmin_extract/` package with `__main__.py`, `cli.py`, `app.py` (TUI stub), `menu.py` (print menu)
+- Phase 2: full Textual TUI screens (main menu, data pull, config wizard)
+- Phase 3: config wizard screen
+- Phase 4: automation wizard (Gmail, cron, Drive/Sheets)
 
 ## Agent Rules
 

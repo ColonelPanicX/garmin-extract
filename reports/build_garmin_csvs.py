@@ -17,7 +17,7 @@ Usage:
 import argparse
 import csv
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -78,7 +78,9 @@ def ms_to_date(ms) -> str:
 def ms_to_iso_utc(ms) -> str:
     """Convert millisecond Unix timestamp to ISO 8601 UTC string (YYYY-MM-DDTHH:MM:SSZ)."""
     try:
-        return datetime.utcfromtimestamp(int(ms) / 1000).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
     except (TypeError, ValueError, OSError):
         return ""
 
@@ -396,7 +398,9 @@ def extract_activities(path: Path, date: str) -> list[dict]:
         # Timestamps may be ms epoch or ISO strings depending on source
         start_local = a.get("startTimeLocal") or a.get("beginTimestamp")
         if isinstance(start_local, (int, float)) and start_local > 1e10:
-            start_local = datetime.utcfromtimestamp(int(start_local) / 1000).isoformat()
+            start_local = datetime.fromtimestamp(int(start_local) / 1000, tz=timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            )
 
         duration_s = a.get("duration")
         if duration_s and duration_s > 86400:

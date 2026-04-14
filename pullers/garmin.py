@@ -24,7 +24,7 @@ import platform
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -516,7 +516,7 @@ def main():
                 results = pull_date(sb, d, display_name, uuid)
                 results["_meta"] = {
                     "date": d.isoformat(),
-                    "pulled_at": datetime.utcnow().isoformat() + "Z",
+                    "pulled_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + "Z",
                     "source": "garmin-browser",
                     "display_name": display_name,
                     "uuid": uuid,
