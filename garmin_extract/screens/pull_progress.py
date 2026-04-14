@@ -279,11 +279,11 @@ class PullProgressScreen(Screen[None]):
             assert proc.stdout is not None
             for raw_line in iter(proc.stdout.readline, ""):
                 line = raw_line.rstrip("\n")
-                self.call_from_thread(self._on_line, line)
+                self.app.call_from_thread(self._on_line, line)
             proc.wait()
-            self.call_from_thread(self._on_done, proc.returncode)
+            self.app.call_from_thread(self._on_done, proc.returncode)
         except Exception as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
 
     # ── UI update helpers (called on main thread via call_from_thread) ─────────
 
