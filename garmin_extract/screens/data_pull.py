@@ -27,6 +27,8 @@ def _yesterday() -> str:
 class DataPullScreen(Screen[None]):
     """Submenu for pulling data and rebuilding reports."""
 
+    _ITEM_COUNT = 7
+
     BINDINGS = [
         Binding("1", "pull_yesterday", show=False),
         Binding("2", "pull_7", show=False),
@@ -35,6 +37,11 @@ class DataPullScreen(Screen[None]):
         Binding("5", "pull_history", show=False),
         Binding("6", "import_zip", show=False),
         Binding("7", "rebuild_csvs", show=False),
+        Binding("up", "cursor_up", show=False),
+        Binding("k", "cursor_up", show=False),
+        Binding("down", "cursor_down", show=False),
+        Binding("j", "cursor_down", show=False),
+        Binding("enter", "cursor_select", show=False),
         Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -70,36 +77,73 @@ class DataPullScreen(Screen[None]):
     }
     """
 
+    def _item(self, n: int, key: str, label: str, hint: str = "") -> str:
+        """Render one menu item with cursor indicator if selected."""
+        sel = (n - 1) == self._cursor
+        pre = "❯ " if sel else "  "
+        lbl = f"[bold]{label}[/]" if sel else label
+        h = f"  [dim]{hint}[/]" if hint else ""
+        return f"{pre}[bold cyan][{key}][/]  {lbl}{h}"
+
     def _build_menu(self) -> str:
         yest = _yesterday()
         r7 = _date_range_label(7)
         r30 = _date_range_label(30)
+        _ = self._item
         return (
             f"\n"
             f"  [bold dim]RECENT[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][1][/]  Yesterday              [dim]{yest}[/]\n"
-            f"  [bold cyan][2][/]  Last 7 days            [dim]{r7}[/]\n"
-            f"  [bold cyan][3][/]  Last 30 days           [dim]{r30}[/]\n"
+            f"{_(1, '1', 'Yesterday', yest)}\n"
+            f"{_(2, '2', 'Last 7 days', r7)}\n"
+            f"{_(3, '3', 'Last 30 days', r30)}\n"
             f"\n"
             f"  [bold dim]CUSTOM[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][4][/]  Specific date or range\n"
-            f"  [bold cyan][5][/]  Full history  [dim](from a date you choose)[/]\n"
+            f"{_(4, '4', 'Specific date or range')}\n"
+            f"{_(5, '5', 'Full history', '(from a date you choose)')}\n"
             f"\n"
             f"  [bold dim]IMPORT[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][6][/]  Import from Garmin bulk export  [dim](.zip)[/]\n"
+            f"{_(6, '6', 'Import from Garmin bulk export', '.zip')}\n"
             f"\n"
             f"  [bold dim]REPORTS[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][7][/]  Rebuild CSV reports  [dim](from existing data)[/]\n"
+            f"{_(7, '7', 'Rebuild CSV reports', 'from existing data')}\n"
         )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static(self._build_menu(), id="pull-menu")
         yield Static(
-            "Press a number to select  ·  b  back  ·  q  quit",
+            "↑↓  j/k  navigate  ·  enter  select  ·  1–7  direct  ·  b  back",
             id="pull-hint",
         )
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._cursor = 0
+
+    def _refresh_menu(self) -> None:
+        self.query_one("#pull-menu", Static).update(self._build_menu())
+
+    def action_cursor_up(self) -> None:
+        if self._cursor > 0:
+            self._cursor -= 1
+            self._refresh_menu()
+
+    def action_cursor_down(self) -> None:
+        if self._cursor < self._ITEM_COUNT - 1:
+            self._cursor += 1
+            self._refresh_menu()
+
+    def action_cursor_select(self) -> None:
+        _actions = [
+            self.action_pull_yesterday,
+            self.action_pull_7,
+            self.action_pull_30,
+            self.action_pull_custom,
+            self.action_pull_history,
+            self.action_import_zip,
+            self.action_rebuild_csvs,
+        ]
+        _actions[self._cursor]()
 
     def _push_progress(
         self,
@@ -122,27 +166,34 @@ class DataPullScreen(Screen[None]):
         )
 
     def action_pull_yesterday(self) -> None:
+        self._cursor = 0
         yest = _yesterday()
         self._push_progress(yest, 1, f"Yesterday  ({yest})")
 
     def action_pull_7(self) -> None:
+        self._cursor = 1
         start = (date.today() - timedelta(days=7)).isoformat()
         self._push_progress(start, 7, f"Last 7 days  ({_date_range_label(7)})")
 
     def action_pull_30(self) -> None:
+        self._cursor = 2
         start = (date.today() - timedelta(days=30)).isoformat()
         self._push_progress(start, 30, f"Last 30 days  ({_date_range_label(30)})")
 
     def action_pull_custom(self) -> None:
+        self._cursor = 3
         self.app.push_screen(CustomDateScreen())
 
     def action_pull_history(self) -> None:
+        self._cursor = 4
         self.app.push_screen(FullHistoryScreen())
 
     def action_import_zip(self) -> None:
+        self._cursor = 5
         self.app.push_screen(ImportZipScreen())
 
     def action_rebuild_csvs(self) -> None:
+        self._cursor = 6
         self._push_progress("", 0, "Rebuilding CSV reports", rebuild_only=True)
 
     def action_back(self) -> None:

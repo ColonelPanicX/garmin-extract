@@ -16,21 +16,31 @@ GMAIL_TOKEN_FILE = ROOT / ".google_token.json"
 PULL_SCRIPT = ROOT / "scripts" / "pull-garmin.sh"
 _CRON_MARKER = "# garmin-extract"
 
-_MENU = """\
+_W = 53
+_ITEMS = [
+    ("1", "Gmail MFA", "View automation status"),
+    ("2", "Scheduled Pulls", "Set up automatic daily data pull"),
+    ("3", "Google Drive / Sheets", "Export to Google services"),
+]
+_EMPTY_ROW = "  │" + " " * _W + "│"
 
-  ┌─────────────────────────────────────────────────────┐
-  │                                                     │
-  │   [1]  Gmail MFA                                    │
-  │        View automation status                       │
-  │                                                     │
-  │   [2]  Scheduled Pulls                              │
-  │        Set up automatic daily data pull             │
-  │                                                     │
-  │   [3]  Google Drive / Sheets                        │
-  │        Export to Google services                    │
-  │                                                     │
-  └─────────────────────────────────────────────────────┘\
-"""
+
+def _build_menu(cursor: int = 0) -> str:
+    top = "  ┌" + "─" * _W + "┐"
+    bottom = "  └" + "─" * _W + "┘"
+    rows = ["\n" + top, _EMPTY_ROW]
+    for i, (key, label, hint) in enumerate(_ITEMS):
+        sel = i == cursor
+        cur = "❯" if sel else " "
+        lbl = f"[bold]{label}[/]" if sel else label
+        h = f"[bold]{hint}[/]" if sel else hint
+        lbl_pad = " " * (_W - 8 - len(label))
+        hint_pad = " " * (_W - 8 - len(hint))
+        rows.append(f"  │ {cur} [bold cyan][{key}][/]  {lbl}{lbl_pad}│")
+        rows.append(f"  │        [dim]{h}[/]{hint_pad}│")
+        rows.append(_EMPTY_ROW)
+    rows.append(bottom)
+    return "\n".join(rows)
 
 
 # ── cron helpers ──────────────────────────────────────────────────────────────
@@ -137,10 +147,17 @@ def _check_gmail_automation() -> tuple[str, str]:
 class AutomationScreen(Screen[None]):
     """Automation landing — Gmail MFA status, cron schedule, Drive/Sheets."""
 
+    _ITEM_COUNT = 3
+
     BINDINGS = [
-        Binding("1", "go_gmail", "Gmail MFA", show=False),
-        Binding("2", "go_cron", "Cron Schedule", show=False),
-        Binding("3", "go_sheets", "Drive/Sheets", show=False),
+        Binding("1", "go_gmail", show=False),
+        Binding("2", "go_cron", show=False),
+        Binding("3", "go_sheets", show=False),
+        Binding("up", "cursor_up", show=False),
+        Binding("k", "cursor_up", show=False),
+        Binding("down", "cursor_down", show=False),
+        Binding("j", "cursor_down", show=False),
+        Binding("enter", "cursor_select", show=False),
         Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -174,17 +191,42 @@ class AutomationScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("Automation", id="auto-header")
-        yield Static(_MENU, id="auto-options")
-        yield Static("Press  1  2  3  to select  ·  b  to go back", id="auto-hint")
+        yield Static(_build_menu(0), id="auto-options")
+        yield Static(
+            "↑↓  j/k  navigate  ·  enter  select  ·  1–3  direct  ·  b  back",
+            id="auto-hint",
+        )
         yield Footer()
 
+    def on_mount(self) -> None:
+        self._cursor = 0
+
+    def _refresh_menu(self) -> None:
+        self.query_one("#auto-options", Static).update(_build_menu(self._cursor))
+
+    def action_cursor_up(self) -> None:
+        if self._cursor > 0:
+            self._cursor -= 1
+            self._refresh_menu()
+
+    def action_cursor_down(self) -> None:
+        if self._cursor < self._ITEM_COUNT - 1:
+            self._cursor += 1
+            self._refresh_menu()
+
+    def action_cursor_select(self) -> None:
+        [self.action_go_gmail, self.action_go_cron, self.action_go_sheets][self._cursor]()
+
     def action_go_gmail(self) -> None:
+        self._cursor = 0
         self.app.push_screen(GmailMfaScreen())
 
     def action_go_cron(self) -> None:
+        self._cursor = 1
         self.app.push_screen(CronScreen())
 
     def action_go_sheets(self) -> None:
+        self._cursor = 2
         from garmin_extract.screens.drive_sheets import DriveSheetsScreen
 
         self.app.push_screen(DriveSheetsScreen())

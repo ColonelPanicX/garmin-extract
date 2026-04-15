@@ -99,10 +99,17 @@ def _status_tag(ok: bool, text: str) -> str:
 class SetupScreen(Screen[None]):
     """Landing screen for Initial Setup — shows live status for all three areas."""
 
+    _ITEM_COUNT = 3
+
     BINDINGS = [
         Binding("1", "go_prereqs", show=False),
         Binding("2", "go_credentials", show=False),
         Binding("3", "go_gmail", show=False),
+        Binding("up", "cursor_up", show=False),
+        Binding("k", "cursor_up", show=False),
+        Binding("down", "cursor_down", show=False),
+        Binding("j", "cursor_down", show=False),
+        Binding("enter", "cursor_select", show=False),
         Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -130,12 +137,19 @@ class SetupScreen(Screen[None]):
         yield Header(show_clock=True)
         yield Static(self._build_menu(), id="setup-menu")
         yield Static(
-            "Press a number to select  ·  b  back  ·  q  quit",
+            "↑↓  j/k  navigate  ·  enter  select  ·  1–3  direct  ·  b  back",
             id="setup-hint",
         )
         yield Footer()
 
     def on_mount(self) -> None:
+        self._cursor = 0
+        self._prereq_ok = False
+        self._prereq_status = "[dim]checking…[/]"
+        self._creds_ok = False
+        self._creds_str = "[dim]checking…[/]"
+        self._gmail_ok = False
+        self._gmail_str = "[dim]checking…[/]"
         self._refresh_status()
 
     def on_screen_resume(self) -> None:
@@ -187,8 +201,24 @@ class SetupScreen(Screen[None]):
         gmail_ok: bool,
         gmail_str: str,
     ) -> None:
+        self._prereq_ok = prereq_ok
+        self._prereq_status = prereq_status
+        self._creds_ok = creds_ok
+        self._creds_str = creds_str
+        self._gmail_ok = gmail_ok
+        self._gmail_str = gmail_str
+        self._redraw_menu()
+
+    def _redraw_menu(self) -> None:
         self.query_one("#setup-menu", Static).update(
-            self._build_menu(prereq_ok, prereq_status, creds_ok, creds_str, gmail_ok, gmail_str)
+            self._build_menu(
+                self._prereq_ok,
+                self._prereq_status,
+                self._creds_ok,
+                self._creds_str,
+                self._gmail_ok,
+                self._gmail_str,
+            )
         )
 
     def _build_menu(
@@ -200,31 +230,55 @@ class SetupScreen(Screen[None]):
         gmail_ok: bool = False,
         gmail_str: str = "[dim]checking…[/]",
     ) -> str:
+        cursor = getattr(self, "_cursor", 0)
         p_icon = "[green]✓[/]" if prereq_ok else "[yellow]○[/]"
         c_icon = "[green]✓[/]" if creds_ok else "[yellow]○[/]"
         g_icon = "[green]✓[/]" if gmail_ok else "[dim]○[/]"
+
+        def _pre(idx: int) -> str:
+            return "❯ " if cursor == idx else "  "
+
+        def _lbl(text: str, idx: int) -> str:
+            return f"[bold]{text}[/]" if cursor == idx else text
+
         return (
             f"\n"
             f"  [bold dim]PREREQUISITES[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][1][/]  Check & Install\n"
+            f"{_pre(0)}[bold cyan][1][/]  {_lbl('Check & Install', 0)}\n"
             f"       {p_icon}  {prereq_status}\n"
             f"\n"
             f"  [bold dim]CREDENTIALS[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][2][/]  Garmin Connect\n"
+            f"{_pre(1)}[bold cyan][2][/]  {_lbl('Garmin Connect', 1)}\n"
             f"       {c_icon}  [dim]{creds_str}[/]\n"
             f"\n"
             f"  [bold dim]AUTOMATION[/]  [dim](optional)[/]\n  {'─' * 51}\n"
-            f"  [bold cyan][3][/]  Gmail MFA\n"
+            f"{_pre(2)}[bold cyan][3][/]  {_lbl('Gmail MFA', 2)}\n"
             f"       {g_icon}  [dim]{gmail_str}[/]\n"
         )
 
+    def action_cursor_up(self) -> None:
+        if self._cursor > 0:
+            self._cursor -= 1
+            self._redraw_menu()
+
+    def action_cursor_down(self) -> None:
+        if self._cursor < self._ITEM_COUNT - 1:
+            self._cursor += 1
+            self._redraw_menu()
+
+    def action_cursor_select(self) -> None:
+        [self.action_go_prereqs, self.action_go_credentials, self.action_go_gmail][self._cursor]()
+
     def action_go_prereqs(self) -> None:
+        self._cursor = 0
         self.app.push_screen(PrereqScreen())
 
     def action_go_credentials(self) -> None:
+        self._cursor = 1
         self.app.push_screen(CredentialsScreen())
 
     def action_go_gmail(self) -> None:
+        self._cursor = 2
         self.app.push_screen(GmailSetupScreen())
 
     def action_back(self) -> None:
