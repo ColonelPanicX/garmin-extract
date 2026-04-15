@@ -253,6 +253,32 @@ Failed metrics are recorded inline rather than aborting the pull:
 
 **One-time profile pull** (per session): devices, user profile, personal records, training plans, workouts, gear → `data/garmin/profile.json`.
 
+## Troubleshooting
+
+**Pull fails immediately or browser crashes (exit code 1, no metrics pulled)**
+
+The saved Chrome session in `.garmin_browser_profile/` may be stale or corrupted. Clear it to force a fresh login:
+
+```bash
+rm -rf .garmin_browser_profile/
+```
+
+Then re-run. Chrome will log in fresh, trigger MFA, and save a new session. This is the most common fix after long gaps between pulls or after Garmin rotates session tokens (~30 days).
+
+---
+
+**MFA modal never appears / pull hangs waiting for a code**
+
+Make sure Gmail automation is fully configured (Setup → Gmail MFA). If only Drive/Sheets OAuth was completed, the Gmail scope is missing and the puller will skip Gmail polling and show the manual MFA modal instead.
+
+---
+
+**Metrics return empty or 404**
+
+Garmin's API endpoints are reverse-engineered from the Connect SPA and may change with app updates. If data stops coming back, the endpoints likely need to be re-mapped using Chrome DevTools → Network tab while browsing Garmin Connect.
+
+---
+
 ## Known limitations
 
 - Tested on **Ubuntu 24.04**. Windows and macOS are supported but less tested.
