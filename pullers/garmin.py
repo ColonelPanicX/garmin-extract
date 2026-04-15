@@ -630,7 +630,7 @@ def main():
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
-        with SB(uc=True, headless=False, user_data_dir=str(PROFILE_DIR)) as sb:
+        with SB(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
             ensure_logged_in(sb)
 
             print("Getting display name...")
