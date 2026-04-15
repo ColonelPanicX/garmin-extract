@@ -15,6 +15,18 @@ import sys
 from garmin_extract import __version__
 
 
+def _is_gui_available() -> bool:
+    """Return True if running on Windows with PySide6 installed."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import PySide6  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _is_tui_capable() -> bool:
     """Return True if the current environment can support a Textual TUI."""
     # Explicit opt-outs
@@ -46,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use the print menu instead of the TUI",
     )
     parser.add_argument(
+        "--no-gui",
+        action="store_true",
+        help="Skip the PySide6 GUI on Windows — use the TUI or print menu",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Preview actions without making changes (print menu only — Phase 2 for TUI)",
@@ -68,9 +85,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
 
-    use_tui = not args.no_tui and _is_tui_capable()
+    if args.no_tui:
+        from garmin_extract.menu import main as run_menu
 
-    if use_tui:
+        run_menu(dry_run=args.dry_run, verbose=args.verbose)
+    elif not args.no_gui and _is_gui_available():
+        from garmin_extract.gui.app import run
+
+        run(dry_run=args.dry_run, verbose=args.verbose)
+    elif _is_tui_capable():
         from garmin_extract.app import GarminExtractApp
 
         GarminExtractApp(dry_run=args.dry_run, verbose=args.verbose).run()

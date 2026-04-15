@@ -69,6 +69,7 @@ def save_to_keyring(email: str, password: str) -> tuple[bool, str]:
 
         keyring.set_password(_SERVICE, _EMAIL_KEY, email)
         keyring.set_password(_SERVICE, _PASSWORD_KEY, password)
+        _scrub_env()
         return True, "Saved to keyring"
     except Exception as exc:
         return False, str(exc)
@@ -108,6 +109,23 @@ def check_credentials() -> tuple[bool, str]:
         return False, f"{email}  [dim](no password in .env)[/]"
 
     return False, "Not configured"
+
+
+def _scrub_env() -> None:
+    """Remove Garmin credentials from .env after a successful keyring save."""
+    if not ENV_FILE.exists():
+        return
+    kept = []
+    for line in ENV_FILE.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("GARMIN_EMAIL=", "GARMIN_PASSWORD=")):
+            continue
+        kept.append(line)
+    # If nothing meaningful remains, delete the file entirely
+    if all(not ln.strip() or ln.strip().startswith("#") for ln in kept):
+        ENV_FILE.unlink()
+    else:
+        ENV_FILE.write_text("\n".join(kept) + "\n")
 
 
 def _load_from_env() -> tuple[str, str]:
