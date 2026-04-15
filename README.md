@@ -12,13 +12,15 @@ Once logged in, Chrome saves the session to a local browser profile and reuses i
 
 ## Features
 
-- **Interactive TUI** — a full terminal interface that walks you through setup, data pulls, and automation without touching the command line
+- **Interactive TUI** — a full terminal interface that walks you through setup, data pulls, and automation without touching the command line; navigate with arrow keys, `j/k`, number shortcuts, or `enter`
 - **30+ metrics per day** — steps, heart rate, sleep, HRV, stress, body battery, SpO2, respiration, training readiness, nutrition, activities, and more
 - **Per-activity detail** — 8 additional endpoints per workout (splits, HR zones, power zones, exercise sets, weather, and more)
 - **One-time profile pull** — devices, personal records, training plans, and gear saved to `profile.json`
+- **Fetch New** — automatically detects the most recent local date and pulls only the gap to yesterday; no manual date math required
 - **Historical backfill** from Garmin's bulk data export (`.zip` file)
 - **CSV export** — `garmin_daily.csv` (daily metrics) and `garmin_activities.csv` (per-workout)
 - **Google Drive / Sheets export** — upload CSVs to Drive or sync to a live Google Sheet, all from inside the TUI
+- **Secure credential storage** — passwords saved to OS keyring (SecretService / Credential Manager / Keychain) by default; `.env` fallback with plaintext warning if keyring is unavailable; runtime-only entry if no storage is desired
 - Partial failures are non-fatal — the daily file is written with whatever succeeded
 - Idempotent — safe to run multiple times; already-pulled dates are skipped by default
 
@@ -81,7 +83,7 @@ python -m garmin_extract
 The interactive TUI is the recommended way to get started. On launch you'll land on the main menu:
 
 ```
-  garmin-extract  v1.2.0
+  garmin-extract  v1.3.0
   Automated Garmin Connect data pipeline
 
   ┌─────────────────────────────────────────────────────┐
@@ -91,10 +93,12 @@ The interactive TUI is the recommended way to get started. On launch you'll land
   └─────────────────────────────────────────────────────┘
 ```
 
+All menus support keyboard navigation: `↑↓` or `j/k` to move, `enter` to select, number keys for direct access.
+
 **First-time setup order:**
 
 1. **Initial Setup → Prerequisites** — verifies Chrome, Xvfb (Linux), Python version, and packages. Installs missing prerequisites on Linux.
-2. **Initial Setup → Garmin Credentials** — enter your Garmin email and password. Saved to `.env`.
+2. **Initial Setup → Garmin Credentials** — enter your Garmin email and password. Saved to the OS keyring by default (encrypted at rest). If keyring is unavailable, you'll be offered `.env` storage with a plaintext warning, or you can skip saving and enter credentials at runtime before each pull.
 3. **Initial Setup → Gmail OAuth** *(optional but recommended)* — authorizes the Gmail API so MFA codes are fetched automatically. The same OAuth token also grants access to Google Drive and Sheets. See [Gmail MFA automation](#gmail-mfa-automation).
 4. **Pull Data** — choose a date range and pull. On the first pull, Chrome launches, logs in, handles MFA, and saves a session to `.garmin_browser_profile/`. Subsequent runs reuse that session.
 
@@ -286,6 +290,29 @@ Garmin's API endpoints are reverse-engineered from the Connect SPA and may chang
 - The API endpoints are **reverse-engineered from the Garmin Connect SPA**. They may change with Garmin app updates. If metrics start returning 404/empty responses, the endpoints may need to be re-mapped using Chrome DevTools → Network tab.
 
 ## Changelog
+
+### v1.3.0 — 2026-04-15 — Navigation, keyring credentials, Fetch New
+
+**Keyboard navigation across all menus** (↑↓ / j/k / enter):
+- Every menu screen — Main Menu, Pull Data, Setup, Automation, Drive/Sheets — now supports arrow keys, vim motions (`j/k`), and `enter` to select, in addition to existing number shortcuts
+
+**Keyring-first credential storage:**
+- Passwords are now saved to the OS keyring (SecretService on Linux, Credential Manager on Windows, Keychain on macOS) by default — encrypted at rest, never written to disk
+- If no secure keyring backend is available, `.env` storage is offered with a prominent plaintext warning
+- Third option: runtime-only entry — enter credentials before each pull, nothing saved anywhere
+- Setup screen detects keyring availability on mount and adjusts the UI accordingly
+
+**Fetch New** (Pull Data → `[0]`):
+- Scans `data/garmin/` for the most recent local date, computes the gap to yesterday, and launches a pull automatically — no manual date selection required
+- If already up to date, shows a toast notification
+- If no local data exists yet, falls through to the Full History prompt
+
+**Bug fixes:**
+- `b` back is now always visible and functional during an active pull — pressing it terminates the subprocess and returns to the menu immediately
+- Gmail `is_configured()` now checks that the OAuth token contains the `gmail.readonly` scope, not just that the token file exists — prevents a 90-second polling wait when only Drive/Sheets OAuth has been completed
+- Fixed `AttributeError: 'DataPullScreen' object has no attribute '_cursor'` crash on screen open
+
+---
 
 ### v1.2.0 — 2026-04-15 — Google Drive / Sheets export
 
