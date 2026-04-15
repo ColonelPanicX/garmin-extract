@@ -18,12 +18,14 @@ Once logged in, Chrome saves the session to a local browser profile and reuses i
 - **One-time profile pull** — devices, personal records, training plans, and gear saved to `profile.json`
 - **Historical backfill** from Garmin's bulk data export (`.zip` file)
 - **CSV export** — `garmin_daily.csv` (daily metrics) and `garmin_activities.csv` (per-workout)
+- **Google Drive / Sheets export** — upload CSVs to Drive or sync to a live Google Sheet, all from inside the TUI
 - Partial failures are non-fatal — the daily file is written with whatever succeeded
 - Idempotent — safe to run multiple times; already-pulled dates are skipped by default
 
 **Optional automation:**
 - Fully automatic MFA via Gmail API — the tool reads your Garmin security code from Gmail so session renewals require no human action
 - Scheduled daily pulls configured from inside the TUI
+- Google Drive / Sheets sync triggered on demand from the Automation screen
 
 ## Requirements
 
@@ -79,7 +81,7 @@ python -m garmin_extract
 The interactive TUI is the recommended way to get started. On launch you'll land on the main menu:
 
 ```
-  garmin-extract  v1.1.0
+  garmin-extract  v1.2.0
   Automated Garmin Connect data pipeline
 
   ┌─────────────────────────────────────────────────────┐
@@ -93,7 +95,7 @@ The interactive TUI is the recommended way to get started. On launch you'll land
 
 1. **Initial Setup → Prerequisites** — verifies Chrome, Xvfb (Linux), Python version, and packages. Installs missing prerequisites on Linux.
 2. **Initial Setup → Garmin Credentials** — enter your Garmin email and password. Saved to `.env`.
-3. **Initial Setup → Gmail OAuth** *(optional but recommended)* — authorizes the Gmail API so MFA codes are fetched automatically. See [Gmail MFA automation](#gmail-mfa-automation).
+3. **Initial Setup → Gmail OAuth** *(optional but recommended)* — authorizes the Gmail API so MFA codes are fetched automatically. The same OAuth token also grants access to Google Drive and Sheets. See [Gmail MFA automation](#gmail-mfa-automation).
 4. **Pull Data** — choose a date range and pull. On the first pull, Chrome launches, logs in, handles MFA, and saves a session to `.garmin_browser_profile/`. Subsequent runs reuse that session.
 
 ### 4. Schedule automatic pulls *(optional)*
@@ -104,6 +106,16 @@ Alternatively, add the shell wrapper directly to your crontab:
 ```
 0 6 * * * /path/to/garmin-extract/scripts/pull-garmin.sh
 ```
+
+### 5. Export to Google Drive / Sheets *(optional)*
+
+From the main menu, go to **Automation → Google Drive / Sheets**. Three options:
+
+- **[1] Upload CSVs to Drive** — uploads `garmin_daily.csv` and `garmin_activities.csv` to a `Garmin Extract` folder in your Google Drive. Creates the folder on first run; updates files in-place on subsequent runs.
+- **[2] Sync to Google Sheets** — creates a `Garmin Data` spreadsheet with `Daily` and `Activities` tabs (or updates an existing one). The sheet is cleared and rewritten on each sync.
+- **[3] Both** — runs Drive upload and Sheets sync in sequence.
+
+The folder ID and sheet ID are saved locally in `.drive_config.json` so subsequent exports update the same resources. Requires Gmail OAuth to be configured first — the same token covers Drive and Sheets access.
 
 ## Usage
 
@@ -246,9 +258,19 @@ Failed metrics are recorded inline rather than aborting the pull:
 - Tested on **Ubuntu 24.04**. Windows and macOS are supported but less tested.
 - Requires a Garmin account with **email MFA enabled** (this is standard on all accounts).
 - The API endpoints are **reverse-engineered from the Garmin Connect SPA**. They may change with Garmin app updates. If metrics start returning 404/empty responses, the endpoints may need to be re-mapped using Chrome DevTools → Network tab.
-- Google Drive / Sheets export is not yet implemented (planned for a future release).
 
 ## Changelog
+
+### v1.2.0 — 2026-04-15 — Google Drive / Sheets export
+
+**Google Drive / Sheets export** (Automation → Google Drive / Sheets):
+- Upload `garmin_daily.csv` and `garmin_activities.csv` to a Google Drive folder — creates `Garmin Extract/` on first run, updates files in-place on subsequent runs
+- Sync data to a `Garmin Data` Google Sheet with `Daily` and `Activities` tabs — creates the spreadsheet on first run, clears and rewrites on each sync
+- "Both" option runs Drive upload and Sheets sync in sequence
+- Auth status and last-export timestamp shown on screen mount; folder/sheet IDs persisted in `.drive_config.json` so exports always update the same resources
+- Reuses the existing Gmail OAuth token (same `google_credentials.json` / `.google_token.json`) — no additional OAuth setup required if Gmail MFA was already configured
+
+---
 
 ### v1.1.0 — 2026-04-14 — Full TUI, expanded API, setup wizard, automation
 
