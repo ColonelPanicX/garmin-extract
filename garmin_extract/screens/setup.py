@@ -69,14 +69,9 @@ def _save_env(vals: dict[str, str]) -> None:
 
 
 def _check_credentials() -> tuple[bool, str]:
-    env = _load_env()
-    email = env.get("GARMIN_EMAIL", "")
-    has_pass = bool(env.get("GARMIN_PASSWORD", ""))
-    if email and has_pass:
-        return True, email
-    if email:
-        return False, f"{email}  (no password)"
-    return False, "Not configured"
+    from garmin_extract._credentials import check_credentials
+
+    return check_credentials()
 
 
 def _check_gmail() -> tuple[bool, str]:
@@ -613,7 +608,7 @@ class CredentialsScreen(Screen[None]):
     }
 
     #creds-box {
-        width: 58;
+        width: 62;
         height: auto;
         border: round $primary;
         padding: 1 2;
@@ -624,9 +619,22 @@ class CredentialsScreen(Screen[None]):
         margin-bottom: 1;
     }
 
-    #creds-hint {
+    #creds-mode {
         color: $text-muted;
+        height: auto;
         margin-bottom: 1;
+    }
+
+    #creds-warning {
+        display: none;
+        color: $error;
+        border: round $error;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+
+    #creds-warning.visible {
+        display: block;
     }
 
     #creds-error {
@@ -640,36 +648,61 @@ class CredentialsScreen(Screen[None]):
     }
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._keyring_available: bool | None = None  # None = still detecting
+
     def compose(self) -> ComposeResult:
-        env = _load_env()
-        existing_email = env.get("GARMIN_EMAIL", "")
         yield Header(show_clock=True)
         with Static(id="creds-box"):
             yield Static("Garmin Connect Credentials", id="creds-title")
-            yield Static(
-                "Saved to .env — never committed to version control.",
-                id="creds-hint",
-            )
-            yield Input(
-                placeholder="Email",
-                value=existing_email,
-                id="creds-email",
-            )
-            yield Input(
-                placeholder="Password",
-                password=True,
-                id="creds-password",
-            )
+            yield Static("[dim]Detecting keyring…[/]", id="creds-mode")
+            yield Static("", id="creds-warning")
+            yield Input(placeholder="Email", id="creds-email")
+            yield Input(placeholder="Password", password=True, id="creds-password")
             yield Static("", id="creds-error")
             yield Static("", id="creds-success")
         yield Footer()
 
     def on_mount(self) -> None:
-        email_input = self.query_one("#creds-email", Input)
-        if email_input.value:
+        from garmin_extract._credentials import load_credentials
+
+        # Pre-fill email from wherever creds are stored
+        email, _ = load_credentials()
+        if email:
+            self.query_one("#creds-email", Input).value = email
             self.query_one("#creds-password", Input).focus()
         else:
-            email_input.focus()
+            self.query_one("#creds-email", Input).focus()
+
+        self.run_worker(self._detect_keyring, thread=True, name="creds-keyring-detect")
+
+    def _detect_keyring(self) -> None:
+        from garmin_extract._credentials import detect_keyring
+
+        ok, detail = detect_keyring()
+        self.app.call_from_thread(self._apply_keyring_state, ok, detail)
+
+    def _apply_keyring_state(self, ok: bool, detail: str) -> None:
+        self._keyring_available = ok
+        mode = self.query_one("#creds-mode", Static)
+        warning = self.query_one("#creds-warning", Static)
+
+        if ok:
+            mode.update(f"[green]●[/]  Keyring: {detail}")
+        else:
+            mode.update(
+                "[yellow]⚠[/]  No secure keyring available"
+                " — credentials will be stored in [bold].env[/bold]"
+            )
+            warning.update(
+                "  [bold]⚠  PLAINTEXT WARNING[/bold]\n\n"
+                "  Saving will write your password to a plain-text file on disk.\n"
+                "  Anyone with read access to your filesystem can see it.\n\n"
+                "  [dim]enter[/dim]  →  save to .env (plaintext)\n"
+                "  [dim]esc  [/dim]  →  don't save — you'll be prompted at runtime"
+            )
+            warning.add_class("visible")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "creds-email":
@@ -678,6 +711,8 @@ class CredentialsScreen(Screen[None]):
         self._save()
 
     def _save(self) -> None:
+        from garmin_extract._credentials import save_to_env, save_to_keyring
+
         email = self.query_one("#creds-email", Input).value.strip()
         password = self.query_one("#creds-password", Input).value.strip()
         error = self.query_one("#creds-error", Static)
@@ -693,11 +728,16 @@ class CredentialsScreen(Screen[None]):
             return
 
         error.update("")
-        env = _load_env()
-        env["GARMIN_EMAIL"] = email
-        env["GARMIN_PASSWORD"] = password
-        _save_env(env)
-        success.update(f"✓  Saved — {email}")
+
+        if self._keyring_available:
+            ok, detail = save_to_keyring(email, password)
+            if ok:
+                success.update(f"✓  Saved to keyring — {email}")
+            else:
+                error.update(f"Keyring save failed: {detail}")
+        else:
+            save_to_env(email, password)
+            success.update(f"✓  Saved to .env — {email}")
 
     def action_back(self) -> None:
         self.app.pop_screen()
