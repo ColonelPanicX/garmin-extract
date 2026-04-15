@@ -266,13 +266,19 @@ class PullDataPage(QWidget):
     # ── Actions ───────────────────────────────────────────────────────────
 
     def _start_pull(self, start_date: str, days: int, label: str, **kwargs: object) -> None:
-        """Open the pull progress screen. Placeholder until #29 is built."""
-        QMessageBox.information(
-            self,
-            "Pull Started",
-            f"{label}\n\nStart: {start_date}\nDays: {days}\n\n"
-            "(Progress screen coming in issue #29)",
+        """Open the pull progress dialog."""
+        from garmin_extract.gui.screens.pull_progress import PullProgressDialog
+
+        dlg = PullProgressDialog(
+            start_date=start_date,
+            days=days,
+            label=label,
+            no_skip=bool(kwargs.get("no_skip")),
+            rebuild_only=bool(kwargs.get("rebuild_only")),
+            zip_path=str(kwargs.get("zip_path", "")),
+            parent=self,
         )
+        dlg.exec()
 
     def _fetch_new(self) -> None:
         try:
