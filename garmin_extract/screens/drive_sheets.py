@@ -7,30 +7,47 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
-_MENU = """\
+_W = 53
+_ITEMS = [
+    ("1", "Upload CSVs to Drive", "Upload garmin_daily.csv + activities.csv"),
+    ("2", "Sync to Google Sheets", "Create / update a Garmin Data spreadsheet"),
+    ("3", "Both (Drive + Sheets)", "Upload CSVs and sync spreadsheet"),
+]
+_EMPTY_ROW = "  │" + " " * _W + "│"
 
-  ┌─────────────────────────────────────────────────────┐
-  │                                                     │
-  │   [1]  Upload CSVs to Drive                         │
-  │        Upload garmin_daily.csv + activities.csv     │
-  │                                                     │
-  │   [2]  Sync to Google Sheets                        │
-  │        Create / update a Garmin Data spreadsheet    │
-  │                                                     │
-  │   [3]  Both (Drive + Sheets)                        │
-  │        Upload CSVs and sync spreadsheet             │
-  │                                                     │
-  └─────────────────────────────────────────────────────┘\
-"""
+
+def _build_menu(cursor: int = 0) -> str:
+    top = "  ┌" + "─" * _W + "┐"
+    bottom = "  └" + "─" * _W + "┘"
+    rows = ["\n" + top, _EMPTY_ROW]
+    for i, (key, label, hint) in enumerate(_ITEMS):
+        sel = i == cursor
+        cur = "❯" if sel else " "
+        lbl = f"[bold]{label}[/]" if sel else label
+        h = f"[bold]{hint}[/]" if sel else hint
+        lbl_pad = " " * (_W - 8 - len(label))
+        hint_pad = " " * (_W - 8 - len(hint))
+        rows.append(f"  │ {cur} [bold cyan][{key}][/]  {lbl}{lbl_pad}│")
+        rows.append(f"  │        [dim]{h}[/]{hint_pad}│")
+        rows.append(_EMPTY_ROW)
+    rows.append(bottom)
+    return "\n".join(rows)
 
 
 class DriveSheetsScreen(Screen[None]):
     """Google Drive / Sheets export landing screen."""
 
+    _ITEM_COUNT = 3
+
     BINDINGS = [
-        Binding("1", "do_drive", "Upload to Drive", show=False),
-        Binding("2", "do_sheets", "Sync to Sheets", show=False),
-        Binding("3", "do_both", "Both", show=False),
+        Binding("1", "do_drive", show=False),
+        Binding("2", "do_sheets", show=False),
+        Binding("3", "do_both", show=False),
+        Binding("up", "cursor_up", show=False),
+        Binding("k", "cursor_up", show=False),
+        Binding("down", "cursor_down", show=False),
+        Binding("j", "cursor_down", show=False),
+        Binding("enter", "cursor_select", show=False),
         Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -81,16 +98,36 @@ class DriveSheetsScreen(Screen[None]):
         yield Static("Google Drive / Sheets", id="ds-header")
         yield Static("Checking authorization…", id="ds-auth")
         yield Static("", id="ds-last")
-        yield Static(_MENU, id="ds-menu")
-        yield Static("Press  1  2  3  to select  ·  b  to go back", id="ds-hint")
+        yield Static(_build_menu(0), id="ds-menu")
+        yield Static(
+            "↑↓  j/k  navigate  ·  enter  select  ·  1–3  direct  ·  b  back",
+            id="ds-hint",
+        )
         yield Static("", id="ds-status")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._cursor = 0
         self.run_worker(self._check_auth, thread=True, name="ds-auth-check")
 
     def on_screen_resume(self) -> None:
         self.run_worker(self._check_auth, thread=True, name="ds-auth-check")
+
+    def _refresh_menu(self) -> None:
+        self.query_one("#ds-menu", Static).update(_build_menu(self._cursor))
+
+    def action_cursor_up(self) -> None:
+        if self._cursor > 0:
+            self._cursor -= 1
+            self._refresh_menu()
+
+    def action_cursor_down(self) -> None:
+        if self._cursor < self._ITEM_COUNT - 1:
+            self._cursor += 1
+            self._refresh_menu()
+
+    def action_cursor_select(self) -> None:
+        [self.action_do_drive, self.action_do_sheets, self.action_do_both][self._cursor]()
 
     # ── auth status ──────────────────────────────────────────────────────────
 
@@ -130,14 +167,20 @@ class DriveSheetsScreen(Screen[None]):
         self.query_one("#ds-status", Static).update(text)
 
     def action_do_drive(self) -> None:
+        self._cursor = 0
+        self._refresh_menu()
         self._set_status("[dim]Uploading CSVs to Drive…[/]")
         self.run_worker(self._run_drive, thread=True, exclusive=True, name="ds-drive")
 
     def action_do_sheets(self) -> None:
+        self._cursor = 1
+        self._refresh_menu()
         self._set_status("[dim]Syncing to Google Sheets…[/]")
         self.run_worker(self._run_sheets, thread=True, exclusive=True, name="ds-sheets")
 
     def action_do_both(self) -> None:
+        self._cursor = 2
+        self._refresh_menu()
         self._set_status("[dim]Uploading CSVs and syncing Sheets…[/]")
         self.run_worker(self._run_both, thread=True, exclusive=True, name="ds-both")
 
