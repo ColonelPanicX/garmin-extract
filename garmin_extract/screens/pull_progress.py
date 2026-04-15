@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -75,6 +76,72 @@ class _MfaModal(ModalScreen[None]):
             return
         MFA_FILE.write_text(code + "\n")
         self.dismiss()
+
+
+# ── runtime credentials modal ─────────────────────────────────────────────────
+
+
+class _RuntimeCredsModal(ModalScreen[tuple[str, str] | None]):
+    """Prompt for email + password when no credentials are saved anywhere."""
+
+    BINDINGS = [Binding("escape", "dismiss", "Cancel", show=True)]
+
+    CSS = """
+    _RuntimeCredsModal {
+        align: center middle;
+    }
+
+    #rc-box {
+        width: 58;
+        height: auto;
+        border: round $primary;
+        padding: 1 2;
+    }
+
+    #rc-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #rc-hint {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #rc-error {
+        color: $error;
+        height: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Static(id="rc-box"):
+            yield Static("Enter Garmin Connect Credentials", id="rc-title")
+            yield Static(
+                "No saved credentials found.  These will not be stored.",
+                id="rc-hint",
+            )
+            yield Input(placeholder="Email", id="rc-email")
+            yield Input(placeholder="Password", password=True, id="rc-password")
+            yield Static("", id="rc-error")
+
+    def on_mount(self) -> None:
+        self.query_one("#rc-email", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "rc-email":
+            self.query_one("#rc-password", Input).focus()
+            return
+        email = self.query_one("#rc-email", Input).value.strip()
+        password = self.query_one("#rc-password", Input).value.strip()
+        if not email:
+            self.query_one("#rc-error", Static).update("Email is required.")
+            self.query_one("#rc-email", Input).focus()
+            return
+        if not password:
+            self.query_one("#rc-error", Static).update("Password is required.")
+            return
+        self.dismiss((email, password))
 
 
 # ── day state (multi-day mode) ────────────────────────────────────────────────
@@ -175,6 +242,8 @@ class PullProgressScreen(Screen[None]):
 
         self._done = False
         self._mfa_shown = False
+        self._email = ""
+        self._password = ""
 
         # Determine display mode
         if days > 1:
@@ -213,6 +282,30 @@ class PullProgressScreen(Screen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        # Rebuild/import don't need Garmin credentials
+        if self._rebuild_only or self._zip_path:
+            self._start_pull()
+            return
+
+        from garmin_extract._credentials import load_credentials
+
+        email, password = load_credentials()
+        if password:
+            self._email = email
+            self._password = password
+            self._start_pull()
+        else:
+            self.app.push_screen(_RuntimeCredsModal(), self._on_runtime_creds)
+
+    def _on_runtime_creds(self, creds: tuple[str, str] | None) -> None:
+        if creds is None:
+            # User cancelled — go back
+            self.app.pop_screen()
+            return
+        self._email, self._password = creds
+        self._start_pull()
+
+    def _start_pull(self) -> None:
         cmd = self._build_cmd()
         self.run_worker(lambda: self._do_pull(cmd), thread=True, name="puller")
 
@@ -266,6 +359,14 @@ class PullProgressScreen(Screen[None]):
     # ── worker (thread) ────────────────────────────────────────────────────────
 
     def _do_pull(self, cmd: list[str]) -> None:
+        # Build subprocess env — inject credentials so keyring/runtime creds
+        # reach garmin.py even though it calls load_dotenv() internally.
+        env = os.environ.copy()
+        if self._email:
+            env["GARMIN_EMAIL"] = self._email
+        if self._password:
+            env["GARMIN_PASSWORD"] = self._password
+
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -274,6 +375,7 @@ class PullProgressScreen(Screen[None]):
                 stdin=subprocess.DEVNULL,
                 text=True,
                 cwd=str(ROOT),
+                env=env,
             )
             assert proc.stdout is not None
             for raw_line in iter(proc.stdout.readline, ""):
