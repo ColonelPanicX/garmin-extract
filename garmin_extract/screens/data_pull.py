@@ -79,7 +79,7 @@ class DataPullScreen(Screen[None]):
 
     def _item(self, n: int, key: str, label: str, hint: str = "") -> str:
         """Render one menu item with cursor indicator if selected."""
-        sel = (n - 1) == self._cursor
+        sel = (n - 1) == getattr(self, "_cursor", 0)
         pre = "❯ " if sel else "  "
         lbl = f"[bold]{label}[/]" if sel else label
         h = f"  [dim]{hint}[/]" if hint else ""
