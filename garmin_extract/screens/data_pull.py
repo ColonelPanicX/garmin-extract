@@ -24,12 +24,37 @@ def _yesterday() -> str:
     return (date.today() - timedelta(days=1)).isoformat()
 
 
+def _find_fetch_new_range() -> tuple[str, int] | None:
+    """
+    Scan data/garmin/ for the most recent date file.
+    Returns (start_iso, days) covering next-unsynced → yesterday.
+    Returns None if already up to date.
+    Raises FileNotFoundError if no date files exist yet.
+    """
+    import re
+
+    data_dir = Path(__file__).parent.parent.parent / "data" / "garmin"
+    if not data_dir.exists():
+        raise FileNotFoundError("no data directory")
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
+    dates = sorted(f.stem for f in data_dir.glob("*.json") if date_re.match(f.name))
+    if not dates:
+        raise FileNotFoundError("no date files")
+    latest = date.fromisoformat(dates[-1])
+    yesterday = date.today() - timedelta(days=1)
+    start = latest + timedelta(days=1)
+    if start > yesterday:
+        return None  # already up to date
+    return start.isoformat(), (yesterday - start).days + 1
+
+
 class DataPullScreen(Screen[None]):
     """Submenu for pulling data and rebuilding reports."""
 
-    _ITEM_COUNT = 7
+    _ITEM_COUNT = 8
 
     BINDINGS = [
+        Binding("0", "fetch_new", show=False),
         Binding("1", "pull_yesterday", show=False),
         Binding("2", "pull_7", show=False),
         Binding("3", "pull_30", show=False),
@@ -77,9 +102,9 @@ class DataPullScreen(Screen[None]):
     }
     """
 
-    def _item(self, n: int, key: str, label: str, hint: str = "") -> str:
+    def _item(self, pos: int, key: str, label: str, hint: str = "") -> str:
         """Render one menu item with cursor indicator if selected."""
-        sel = (n - 1) == self._cursor
+        sel = pos == getattr(self, "_cursor", 0)
         pre = "❯ " if sel else "  "
         lbl = f"[bold]{label}[/]" if sel else label
         h = f"  [dim]{hint}[/]" if hint else ""
@@ -91,6 +116,9 @@ class DataPullScreen(Screen[None]):
         r30 = _date_range_label(30)
         _ = self._item
         return (
+            f"\n"
+            f"  [bold dim]SYNC[/]\n  {'─' * 51}\n"
+            f"{_(0, '0', 'Fetch new', 'pull all dates not yet in local data')}\n"
             f"\n"
             f"  [bold dim]RECENT[/]\n  {'─' * 51}\n"
             f"{_(1, '1', 'Yesterday', yest)}\n"
@@ -112,7 +140,7 @@ class DataPullScreen(Screen[None]):
         yield Header(show_clock=True)
         yield Static(self._build_menu(), id="pull-menu")
         yield Static(
-            "↑↓  j/k  navigate  ·  enter  select  ·  1–7  direct  ·  b  back",
+            "↑↓  j/k  navigate  ·  enter  select  ·  0–7  direct  ·  b  back",
             id="pull-hint",
         )
         yield Footer()
@@ -135,6 +163,7 @@ class DataPullScreen(Screen[None]):
 
     def action_cursor_select(self) -> None:
         _actions = [
+            self.action_fetch_new,
             self.action_pull_yesterday,
             self.action_pull_7,
             self.action_pull_30,
@@ -165,35 +194,50 @@ class DataPullScreen(Screen[None]):
             )
         )
 
-    def action_pull_yesterday(self) -> None:
+    def action_fetch_new(self) -> None:
         self._cursor = 0
+        try:
+            result = _find_fetch_new_range()
+        except FileNotFoundError:
+            # No local data at all — let the user pick a start date
+            self.app.push_screen(FullHistoryScreen())
+            return
+        if result is None:
+            self.notify("Already up to date — no new dates to pull.", title="Fetch New")
+            return
+        start, days = result
+        end = (date.fromisoformat(start) + timedelta(days=days - 1)).isoformat()
+        self._push_progress(start, days, f"Fetch new  ({start}  →  {end})")
+
+    def action_pull_yesterday(self) -> None:
+        self._cursor = 1
         yest = _yesterday()
         self._push_progress(yest, 1, f"Yesterday  ({yest})")
 
     def action_pull_7(self) -> None:
-        self._cursor = 1
+        self._cursor = 2
         start = (date.today() - timedelta(days=7)).isoformat()
         self._push_progress(start, 7, f"Last 7 days  ({_date_range_label(7)})")
 
     def action_pull_30(self) -> None:
-        self._cursor = 2
+        self._cursor = 3
         start = (date.today() - timedelta(days=30)).isoformat()
         self._push_progress(start, 30, f"Last 30 days  ({_date_range_label(30)})")
 
     def action_pull_custom(self) -> None:
-        self._cursor = 3
+        self._cursor = 4
         self.app.push_screen(CustomDateScreen())
 
     def action_pull_history(self) -> None:
-        self._cursor = 4
+        self._cursor = 5
         self.app.push_screen(FullHistoryScreen())
 
     def action_import_zip(self) -> None:
-        self._cursor = 5
+        self._cursor = 6
         self.app.push_screen(ImportZipScreen())
 
     def action_rebuild_csvs(self) -> None:
-        self._cursor = 6
+        self._cursor = 7
         self._push_progress("", 0, "Rebuilding CSV reports", rebuild_only=True)
 
     def action_back(self) -> None:

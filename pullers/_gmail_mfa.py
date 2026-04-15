@@ -172,5 +172,14 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
 
 def is_configured() -> bool:
-    """Return True if Gmail credentials are present and usable."""
-    return TOKEN_FILE.exists() and CREDENTIALS_FILE.exists()
+    """Return True if Gmail credentials are present and the token has the Gmail scope."""
+    if not TOKEN_FILE.exists() or not CREDENTIALS_FILE.exists():
+        return False
+    try:
+        import json as _json
+
+        tok = _json.loads(TOKEN_FILE.read_text())
+        scopes = tok.get("scopes") or []
+        return any("gmail" in s for s in scopes)
+    except Exception:
+        return False

@@ -163,7 +163,7 @@ class PullProgressScreen(Screen[None]):
     """Full-screen live progress display for a Garmin data pull or CSV rebuild."""
 
     BINDINGS = [
-        Binding("b", "back", "Back", show=False),
+        Binding("b", "back", "Back", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -244,6 +244,7 @@ class PullProgressScreen(Screen[None]):
         self._mfa_shown = False
         self._email = ""
         self._password = ""
+        self._proc: subprocess.Popen | None = None
 
         # Determine display mode
         if days > 1:
@@ -377,13 +378,16 @@ class PullProgressScreen(Screen[None]):
                 cwd=str(ROOT),
                 env=env,
             )
+            self._proc = proc
             assert proc.stdout is not None
             for raw_line in iter(proc.stdout.readline, ""):
                 line = raw_line.rstrip("\n")
                 self.app.call_from_thread(self._on_line, line)
             proc.wait()
+            self._proc = None
             self.app.call_from_thread(self._on_done, proc.returncode)
         except Exception as exc:
+            self._proc = None
             self.app.call_from_thread(self._on_error, str(exc))
 
     # ── line parser (main thread) ──────────────────────────────────────────────
@@ -537,13 +541,11 @@ class PullProgressScreen(Screen[None]):
                 f"\n[red]Process exited with code {returncode}.[/red]"
                 "  Press  [bold]b[/bold]  to go back."
             )
-        self._enable_back()
 
     def _on_error(self, msg: str) -> None:
         self._done = True
         self.query_one("#log-panel", RichLog).write(f"\n[red]Error: {msg}[/red]")
         self._set_status("Error  —  press  b  to go back")
-        self._enable_back()
 
     # ── rendering ─────────────────────────────────────────────────────────────
 
@@ -584,21 +586,15 @@ class PullProgressScreen(Screen[None]):
     def _set_status(self, text: str) -> None:
         self.query_one("#status-label", Static).update(text)
 
-    def _enable_back(self) -> None:
-        try:
-            self.BINDINGS = [
-                Binding("b", "back", "Back", show=True),
-                Binding("q", "quit", "Quit", show=True),
-            ]
-            self.refresh_bindings()
-        except Exception:
-            pass
-
     # ── actions ───────────────────────────────────────────────────────────────
 
     def action_back(self) -> None:
-        if self._done:
-            self.app.pop_screen()
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+        self.app.pop_screen()
 
     def action_quit(self) -> None:
         self.app.exit()
