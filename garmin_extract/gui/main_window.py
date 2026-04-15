@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from garmin_extract import __version__
+from garmin_extract.gui.screens.setup import SetupPage
 
 
 class MainWindow(QMainWindow):
@@ -42,9 +43,7 @@ class MainWindow(QMainWindow):
 
         # ── Content area ──────────────────────────────
         self.stack = QStackedWidget()
-        self.stack.addWidget(
-            self._placeholder("Initial Setup", "Configure credentials and prerequisites")
-        )
+        self.stack.addWidget(SetupPage())
         self.stack.addWidget(self._placeholder("Pull Data", "Download your Garmin health metrics"))
         self.stack.addWidget(
             self._placeholder("Automation", "Gmail MFA, scheduled pulls, Drive / Sheets")
