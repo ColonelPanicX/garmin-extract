@@ -393,17 +393,22 @@ class PullProgressScreen(Screen[None]):
                 ds.done += 1
             else:
                 ds.failed += 1
-            self._overall_done += 1
-            self.query_one("#progress-bar", ProgressBar).advance(1)
 
-            # Day complete when done + failed == total
-            if ds.total > 0 and (ds.done + ds.failed) >= ds.total:
+            # Only advance progress up to the announced total — per-activity
+            # sub-requests emit extra ✓/✗ lines that exceed the day's metric count.
+            tally = ds.done + ds.failed
+            if ds.total == 0 or tally <= ds.total:
+                self._overall_done += 1
+                self.query_one("#progress-bar", ProgressBar).advance(1)
+
+            # Day complete when tally reaches the announced total
+            if ds.total > 0 and tally >= ds.total:
                 ds.status = "done"
 
             self._refresh_day_list()
             self._set_status(
                 f"Day {self._current_day_index + 1} of {self._days}"
-                f"  ·  {ds.done + ds.failed}/{ds.total or '?'} metrics"
+                f"  ·  {min(tally, ds.total) if ds.total else tally}/{ds.total or '?'} metrics"
             )
 
     # ── completion / error ─────────────────────────────────────────────────────
@@ -411,6 +416,16 @@ class PullProgressScreen(Screen[None]):
     def _on_done(self, returncode: int) -> None:
         self._done = True
         log = self.query_one("#log-panel", RichLog)
+
+        # For simple mode (rebuild-only / zip import), the right panel and progress
+        # bar are never updated during the run — complete them now.
+        if self._mode == "simple":
+            panel_text = "[green]✓ Complete[/]" if returncode == 0 else "[red]✗ Failed[/]"
+            self.query_one("#metric-list", Static).update(panel_text)
+            bar = self.query_one("#progress-bar", ProgressBar)
+            bar.total = 1
+            bar.advance(1)
+
         if returncode == 0:
             self._set_status("Complete ✓  —  press  b  to go back")
             log.write("\n[green]Done.[/green]  Press  [bold]b[/bold]  to go back.")
@@ -434,7 +449,8 @@ class PullProgressScreen(Screen[None]):
         lines: list[str] = []
         for ds in self._day_states:
             if ds.status == "done":
-                count = f"({ds.done}/{ds.total})" if ds.total else ""
+                tally = min(ds.done + ds.failed, ds.total) if ds.total else ds.done + ds.failed
+                count = f"({tally}/{ds.total})" if ds.total else ""
                 failed = f"  [red]{ds.failed} failed[/]" if ds.failed else ""
                 lines.append(f"[green]✓[/] {ds.date_str}  [dim]{count}[/]{failed}")
             elif ds.status == "active":
