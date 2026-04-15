@@ -40,6 +40,9 @@ reports/*.csv
 .mfa_code
 .gmail_auth_code
 
+# Drive/Sheets config (local state — folder ID, sheet ID, last export)
+.drive_config.json
+
 # Logs
 *.log
 logs/

@@ -185,9 +185,9 @@ class AutomationScreen(Screen[None]):
         self.app.push_screen(CronScreen())
 
     def action_go_sheets(self) -> None:
-        from garmin_extract.screens.stub import StubScreen
+        from garmin_extract.screens.drive_sheets import DriveSheetsScreen
 
-        self.app.push_screen(StubScreen("Google Drive / Sheets", "Phase 5"))
+        self.app.push_screen(DriveSheetsScreen())
 
     def action_back(self) -> None:
         self.app.pop_screen()
