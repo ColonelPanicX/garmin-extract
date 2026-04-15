@@ -43,6 +43,12 @@ reports/*.csv
 # Drive/Sheets config (local state — folder ID, sheet ID, last export)
 .drive_config.json
 
+# App config (persisted theme, user preferences)
+.garmin_config.json
+
+# Files downloaded by Chrome / SeleniumBase during browser automation
+downloaded_files/
+
 # Logs
 *.log
 logs/

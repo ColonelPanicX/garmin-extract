@@ -319,6 +319,20 @@ class PrereqScreen(Screen[None]):
     def on_mount(self) -> None:
         self.run_worker(lambda: self._run_checks(), thread=True, name="prereq-checker")
 
+    def on_screen_resume(self) -> None:
+        """Re-run checks when navigating back from the install screen."""
+        self._states = {k: "pending" for k in self._ITEMS}
+        self._details = {}
+        self._done = False
+        self._can_install = False
+        self.query_one("#prereq-progress", ProgressBar).update(progress=0)
+        self.query_one("#prereq-progress", ProgressBar).display = True
+        self.query_one("#prereq-list", Static).update(self._render_list())
+        self.query_one("#prereq-status", Static).update("Running checks…")
+        self.run_worker(
+            lambda: self._run_checks(), thread=True, name="prereq-checker", exclusive=True
+        )
+
     def _run_checks(self) -> None:
         log = self.query_one("#prereq-log", RichLog)
         checks = [
@@ -345,6 +359,7 @@ class PrereqScreen(Screen[None]):
             self.app.call_from_thread(log.write, f"{icon}  {name}:  {detail}")
 
         self._done = True
+        self.app.call_from_thread(self._hide_progress_bar)
         if not failed:
             self.app.call_from_thread(
                 self.query_one("#prereq-status", Static).update,
@@ -370,6 +385,12 @@ class PrereqScreen(Screen[None]):
                     "\n[yellow]Please install the missing items manually,"
                     " then re-run this check.[/yellow]",
                 )
+
+    def _hide_progress_bar(self) -> None:
+        try:
+            self.query_one("#prereq-progress", ProgressBar).display = False
+        except Exception:
+            pass
 
     def _show_install_binding(self) -> None:
         try:
