@@ -421,7 +421,7 @@ wheels = [
 
 [[package]]
 name = "garmin-extract"
-version = "1.4.0"
+version = "1.4.1"
 source = { virtual = "." }
 dependencies = [
     { name = "google-api-python-client" },
