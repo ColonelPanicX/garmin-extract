@@ -105,17 +105,21 @@ class _RuntimeCredsDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Enter Garmin Connect Credentials")
+        self.setWindowTitle("Garmin Connect Login")
         self.setMinimumWidth(450)
         self.setModal(True)
 
         self.result_email = ""
         self.result_password = ""
+        self.result_manual = False
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        hint = QLabel("No saved credentials found. These will not be stored.")
+        hint = QLabel(
+            "No saved credentials found. Enter them below, or log in manually in the browser."
+        )
+        hint.setWordWrap(True)
         hint.setStyleSheet("color: #6c7086;")
         layout.addWidget(hint)
 
@@ -137,6 +141,10 @@ class _RuntimeCredsDialog(QDialog):
         layout.addWidget(self._error)
 
         btn_layout = QHBoxLayout()
+        manual = QPushButton("Log in manually")
+        manual.setStyleSheet("color: #89b4fa;")
+        manual.clicked.connect(self._use_manual)
+        btn_layout.addWidget(manual)
         btn_layout.addStretch()
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
@@ -161,6 +169,10 @@ class _RuntimeCredsDialog(QDialog):
             return
         self.result_email = email
         self.result_password = password
+        self.accept()
+
+    def _use_manual(self) -> None:
+        self.result_manual = True
         self.accept()
 
 
@@ -353,8 +365,10 @@ class PullProgressDialog(QDialog):
         else:
             dlg = _RuntimeCredsDialog(self)
             if dlg.exec() == QDialog.DialogCode.Accepted:
-                self._email = dlg.result_email
-                self._password = dlg.result_password
+                if not dlg.result_manual:
+                    self._email = dlg.result_email
+                    self._password = dlg.result_password
+                # result_manual=True: leave _email/_password empty — subprocess uses manual login
                 self._start_pull()
             else:
                 self.reject()

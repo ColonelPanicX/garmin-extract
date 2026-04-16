@@ -56,6 +56,13 @@ def needs_virtual_display() -> bool:
     return platform.system() == "Linux" and not os.environ.get("DISPLAY")
 
 
+def has_display() -> bool:
+    """Return True when a real/virtual display is available for manual interaction."""
+    if platform.system() == "Windows":
+        return True
+    return bool(os.environ.get("DISPLAY"))
+
+
 def start_xvfb(display=":99"):
     proc = subprocess.Popen(
         ["Xvfb", display, "-screen", "0", "1280x720x24"],
@@ -124,8 +131,12 @@ def wait_for_mfa() -> str:
 # ---------------------------------------------------------------------------
 
 
-def ensure_logged_in(sb):
-    """Check session and log in if needed."""
+def ensure_logged_in(sb, email: str = "", password: str = "") -> None:
+    """Check session and log in if needed.
+
+    If email/password are provided, login is automated. Otherwise the browser
+    opens to the login page and waits for the user to log in manually.
+    """
     # Remove stale Chrome lock files that prevent profile reuse
     lock = PROFILE_DIR / "SingletonLock"
     if lock.exists():
@@ -135,22 +146,36 @@ def ensure_logged_in(sb):
     sb.sleep(3)
 
     if "sign-in" in sb.get_current_url() or "sso.garmin.com" in sb.get_current_url():
-        print("Session expired or new — logging in...")
-        _do_login(sb)
+        if email and password:
+            print("Session expired or new — logging in...")
+            _do_login(sb, email, password)
+        else:
+            _wait_for_manual_login(sb)
     else:
         print("Existing session active.")
 
 
-def _do_login(sb):
+def _wait_for_manual_login(sb) -> None:
+    """Wait up to 5 minutes for the user to log in manually via the browser."""
+    print("No credentials configured — please log in to Garmin Connect in the browser.")
+    print("Waiting up to 5 minutes for login to complete...")
+    for _ in range(300):
+        url = sb.get_current_url()
+        if "connect.garmin.com" in url and "sso.garmin.com" not in url and "sign-in" not in url:
+            print("Login detected.")
+            return
+        time.sleep(1)
+    print("ERROR: Timed out waiting for manual login.")
+    sys.exit(1)
+
+
+def _do_login(sb, email: str, password: str) -> None:
     sb.uc_open_with_reconnect(
         "https://sso.garmin.com/portal/sso/en-US/sign-in"
         "?clientId=GarminConnect&consumeServiceTicket=false",
         reconnect_time=6,
     )
     sb.sleep(5)
-
-    email = os.environ["GARMIN_EMAIL"]
-    password = os.environ["GARMIN_PASSWORD"]
 
     sb.type("#email", email)
     sb.type("#password", password)
@@ -626,11 +651,14 @@ def main():
         print("ERROR: seleniumbase not installed. Run: pip install -r requirements.txt")
         sys.exit(1)
 
-    email = os.environ.get("GARMIN_EMAIL")
-    password = os.environ.get("GARMIN_PASSWORD")
+    email = os.environ.get("GARMIN_EMAIL", "")
+    password = os.environ.get("GARMIN_PASSWORD", "")
     if not email or not password:
-        print("ERROR: GARMIN_EMAIL and GARMIN_PASSWORD must be set in .env")
-        sys.exit(1)
+        if not has_display():
+            print("ERROR: No credentials set and no display available for manual login.")
+            print("Set GARMIN_EMAIL and GARMIN_PASSWORD in .env or via keyring.")
+            sys.exit(1)
+        print("No credentials configured — manual browser login will be required.")
 
     args = parse_args()
     dates = [args.date + timedelta(days=i) for i in range(args.days)]
@@ -646,7 +674,7 @@ def main():
         # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
         # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
         with SB(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
-            ensure_logged_in(sb)
+            ensure_logged_in(sb, email, password)
 
             print("Getting display name...")
             display_name, uuid = get_display_name(sb)
