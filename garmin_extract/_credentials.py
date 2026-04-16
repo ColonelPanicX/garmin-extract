@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from garmin_extract._paths import app_root
 
 _SERVICE = "garmin-extract"
 _EMAIL_KEY = "email"
 _PASSWORD_KEY = "password"
 _PROBE_KEY = "_probe"
-ROOT = Path(__file__).parent.parent
+ROOT = app_root()
 ENV_FILE = ROOT / ".env"
 
 
@@ -88,8 +88,9 @@ def save_to_env(email: str, password: str) -> None:
 def check_credentials() -> tuple[bool, str]:
     """
     Returns (ok, detail) for status display in SetupScreen.
-    Shows where creds came from.
+    Shows where creds came from, or surfaces keyring errors if lookup fails.
     """
+    keyring_error: str | None = None
     try:
         import keyring  # noqa: PLC0415
 
@@ -99,8 +100,8 @@ def check_credentials() -> tuple[bool, str]:
             return True, f"{email}  [dim](keyring)[/]"
         if email:
             return False, f"{email}  [dim](no password in keyring)[/]"
-    except Exception:
-        pass
+    except Exception as exc:
+        keyring_error = str(exc)
 
     email, password = _load_from_env()
     if email and password:
@@ -108,6 +109,8 @@ def check_credentials() -> tuple[bool, str]:
     if email:
         return False, f"{email}  [dim](no password in .env)[/]"
 
+    if keyring_error:
+        return False, f"Keyring error: {keyring_error}"
     return False, "Not configured"
 
 
