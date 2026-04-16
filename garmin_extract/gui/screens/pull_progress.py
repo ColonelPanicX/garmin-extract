@@ -7,7 +7,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date, timedelta
-from pathlib import Path
 from threading import Thread
 
 from PySide6.QtCore import QObject, Qt, Signal
@@ -24,7 +23,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-ROOT = Path(__file__).parent.parent.parent.parent
+from garmin_extract._paths import app_root, bundle_root
+
+ROOT = app_root()  # user-facing files (.mfa_code, .env, data/)
+SCRIPTS_ROOT = bundle_root()  # subprocess script files (pullers/, reports/)
 MFA_FILE = ROOT / ".mfa_code"
 
 
@@ -365,19 +367,19 @@ class PullProgressDialog(QDialog):
 
     def _build_cmd(self) -> list[str]:
         if self._rebuild_only:
-            return [sys.executable, "-u", str(ROOT / "reports" / "build_garmin_csvs.py")]
+            return [sys.executable, "-u", str(SCRIPTS_ROOT / "reports" / "build_garmin_csvs.py")]
         if self._zip_path:
             return [
                 sys.executable,
                 "-u",
-                str(ROOT / "pullers" / "garmin_import_export.py"),
+                str(SCRIPTS_ROOT / "pullers" / "garmin_import_export.py"),
                 "--zip",
                 self._zip_path,
             ]
         cmd = [
             sys.executable,
             "-u",
-            str(ROOT / "pullers" / "garmin.py"),
+            str(SCRIPTS_ROOT / "pullers" / "garmin.py"),
             "--date",
             self._start_date,
             "--days",

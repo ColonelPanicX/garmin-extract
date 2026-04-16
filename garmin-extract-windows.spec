@@ -23,13 +23,23 @@ block_cipher = None
 hiddenimports = [
     "dotenv",  # pullers/garmin.py — loads .env credentials
     "requests_oauthlib",  # scripts/setup_gmail_auth.py — Gmail OAuth flow
+    # Windows keyring backend dependencies — keyring.backends.Windows uses
+    # pywin32-ctypes to call win32cred (Windows Credential Manager).
+    # PyInstaller's static analysis often misses these since they're imported
+    # dynamically by keyring's backend auto-selection.
+    "win32ctypes",
+    "win32ctypes.pywin32",
+    "win32ctypes.pywin32.win32cred",
+    "win32ctypes.pywin32.pywintypes",
 ]
 hiddenimports += collect_submodules("seleniumbase")
 hiddenimports += collect_submodules("google.auth")
 hiddenimports += collect_submodules("google.oauth2")  # pullers/_gmail_mfa.py
 hiddenimports += collect_submodules("googleapiclient")
 hiddenimports += collect_submodules("google_auth_oauthlib")
+hiddenimports += collect_submodules("keyring")
 hiddenimports += collect_submodules("keyring.backends")
+hiddenimports += collect_submodules("win32ctypes")
 
 # ── Data files ───────────────────────────────────────────────────────────────
 datas = []

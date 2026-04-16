@@ -17,7 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).parent.parent
+from garmin_extract._paths import app_root
+
+ROOT = app_root()
 TOKEN_FILE = ROOT / ".google_token.json"
 CREDENTIALS_FILE = ROOT / "google_credentials.json"
 CONFIG_FILE = ROOT / ".drive_config.json"

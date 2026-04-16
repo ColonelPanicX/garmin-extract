@@ -117,13 +117,35 @@ def save_env(vals: dict[str, str]) -> None:
 
 def _find_chrome() -> tuple[bool, str | None]:
     system = platform.system()
+
+    # Windows: chrome.exe --version launches Chrome instead of printing version.
+    # Check standard install paths and read VersionInfo via PowerShell.
     if system == "Windows":
-        candidates: list[str] = [
-            "chrome",
+        paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
         ]
-    elif system == "Darwin":
+        for path in paths:
+            if not Path(path).is_file():
+                continue
+            try:
+                ps = f"(Get-Item '{path}').VersionInfo.ProductVersion"
+                r = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                version = r.stdout.strip() if r.returncode == 0 else ""
+                label = f"Google Chrome {version}" if version else "Google Chrome"
+                return True, label
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                return True, "Google Chrome (version unknown)"
+        return False, None
+
+    # macOS / Linux: chrome --version prints version and exits
+    if system == "Darwin":
         candidates = [
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "google-chrome",
