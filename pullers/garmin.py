@@ -87,15 +87,20 @@ def wait_for_mfa() -> str:
     except ImportError:
         pass
 
-    # Interactive fallback — prompt inline when stdin is a terminal
+    # Interactive fallback — prompt inline when stdin is a real terminal.
+    # Guard with EOFError: on Windows the NUL device can report isatty()=True
+    # even when stdin is not interactive (e.g. subprocess with DEVNULL).
     print()
     print("MFA REQUIRED — check your email for the 6-digit code.")
     if sys.stdin.isatty():
-        while True:
-            code = input("  Enter code: ").strip()
-            if code:
-                return code
-            print("  No code entered — please try again.")
+        try:
+            while True:
+                code = input("  Enter code: ").strip()
+                if code:
+                    return code
+                print("  No code entered — please try again.")
+        except EOFError:
+            pass  # stdin not truly interactive — fall through to file poll
 
     # Non-interactive fallback (cron / piped stdin) — poll a file
     MFA_FILE.unlink(missing_ok=True)
