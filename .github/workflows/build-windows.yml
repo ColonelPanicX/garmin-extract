@@ -78,4 +78,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
+          # Create the release if it doesn't exist yet (tag push doesn't auto-create a release)
+          $exists = gh release view $tag --json tagName 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --generate-notes
+          }
           gh release upload $tag $env:ZIP_NAME --clobber
