@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QListWidget,
     QMainWindow,
     QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from garmin_extract import __version__
+from garmin_extract.gui.screens.automation import AutomationPage
+from garmin_extract.gui.screens.pull_data import PullDataPage
+from garmin_extract.gui.screens.setup import SetupPage
 
 
 class MainWindow(QMainWindow):
@@ -42,37 +42,9 @@ class MainWindow(QMainWindow):
 
         # ── Content area ──────────────────────────────
         self.stack = QStackedWidget()
-        self.stack.addWidget(
-            self._placeholder("Initial Setup", "Configure credentials and prerequisites")
-        )
-        self.stack.addWidget(self._placeholder("Pull Data", "Download your Garmin health metrics"))
-        self.stack.addWidget(
-            self._placeholder("Automation", "Gmail MFA, scheduled pulls, Drive / Sheets")
-        )
+        self.stack.addWidget(SetupPage())
+        self.stack.addWidget(PullDataPage())
+        self.stack.addWidget(AutomationPage())
         layout.addWidget(self.stack)
 
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
-
-    @staticmethod
-    def _placeholder(title: str, subtitle: str) -> QWidget:
-        """Build a centered placeholder page for a section not yet implemented."""
-        page = QWidget()
-        vbox = QVBoxLayout(page)
-        vbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        heading = QLabel(title)
-        heading.setObjectName("heading")
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vbox.addWidget(heading)
-
-        sub = QLabel(subtitle)
-        sub.setObjectName("subheading")
-        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vbox.addWidget(sub)
-
-        coming = QLabel("Coming soon")
-        coming.setObjectName("subheading")
-        coming.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vbox.addWidget(coming)
-
-        return page
