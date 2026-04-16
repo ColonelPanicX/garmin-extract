@@ -19,7 +19,11 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).parent
+else:
+    ROOT = Path(__file__).parent.parent
+
 DATA_DIR = ROOT / "data" / "garmin"
 
 

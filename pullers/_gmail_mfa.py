@@ -8,10 +8,14 @@ Falls back gracefully if credentials are missing or the API call fails.
 
 import base64
 import re
+import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).parent
+else:
+    ROOT = Path(__file__).parent.parent
 CREDENTIALS_FILE = ROOT / "google_credentials.json"
 TOKEN_FILE = ROOT / ".google_token.json"
 

@@ -31,7 +31,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ROOT = Path(__file__).parent.parent
+# ROOT points to the app directory — containing data/, .env, .garmin_browser_profile/.
+# In a PyInstaller bundle, __file__ is inside _internal/ so we use sys.executable's
+# parent (the directory containing garmin-extract.exe) instead.
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).parent
+else:
+    ROOT = Path(__file__).parent.parent
+
 DATA_DIR = ROOT / "data" / "garmin"
 PROFILE_DIR = ROOT / ".garmin_browser_profile"
 MFA_FILE = ROOT / ".mfa_code"
