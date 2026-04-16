@@ -35,10 +35,11 @@ def _run_script_if_frozen() -> None:
     if script_dir not in sys.path:
         sys.path.insert(0, script_dir)
 
-    # Unbuffered line output so the GUI sees progress in real time
+    # Unbuffered UTF-8 output so the GUI sees progress in real time
+    # (Windows default pipe encoding is cp1252 which can't encode ✓/✗ etc.)
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(line_buffering=True, write_through=True)
+            stream.reconfigure(encoding="utf-8", line_buffering=True, write_through=True)
         except Exception:
             pass
 
