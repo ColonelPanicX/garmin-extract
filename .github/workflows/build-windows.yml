@@ -1,0 +1,81 @@
+name: Build Windows executable
+
+on:
+  # Build and attach to release when a version tag is pushed
+  push:
+    tags:
+      - "v*.*.*"
+  # Allow manual triggering for testing or retroactive builds
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the build to (e.g. v1.4.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write  # needed for uploading release assets
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui]"
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: pyinstaller garmin-extract-windows.spec --noconfirm
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $tag = "${{ inputs.tag }}"
+            if ([string]::IsNullOrWhiteSpace($tag)) {
+              $tag = "dev-$(git rev-parse --short HEAD)"
+            }
+          }
+          echo "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          echo "Tag: $tag"
+
+      - name: Zip the onedir build
+        shell: pwsh
+        run: |
+          $zipName = "garmin-extract-windows-${{ steps.version.outputs.tag }}.zip"
+          Compress-Archive -Path "dist\garmin-extract\*" -DestinationPath $zipName -Force
+          echo "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "Created: $zipName"
+
+      - name: Upload zip as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: garmin-extract-windows-${{ steps.version.outputs.tag }}
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 30
+
+      - name: Attach to GitHub Release
+        # Only attach when triggered by a tag push, or when a tag was explicitly provided
+        if: github.event_name == 'push' || inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          gh release upload $tag $env:ZIP_NAME --clobber

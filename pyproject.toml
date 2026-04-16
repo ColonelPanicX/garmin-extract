@@ -27,6 +27,7 @@ include = ["garmin_extract*"]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["*.spec"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
