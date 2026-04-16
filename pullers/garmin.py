@@ -23,6 +23,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -139,9 +140,9 @@ def _do_login(sb):
     sb.uc_open_with_reconnect(
         "https://sso.garmin.com/portal/sso/en-US/sign-in"
         "?clientId=GarminConnect&consumeServiceTicket=false",
-        reconnect_time=3,
+        reconnect_time=6,
     )
-    sb.sleep(3)
+    sb.sleep(5)
 
     email = os.environ["GARMIN_EMAIL"]
     password = os.environ["GARMIN_PASSWORD"]
@@ -149,7 +150,7 @@ def _do_login(sb):
     sb.type("#email", email)
     sb.type("#password", password)
     sb.sleep(1)
-    sb.save_screenshot("/tmp/garmin_pre_submit.png")
+    sb.save_screenshot(str(Path(tempfile.gettempdir()) / "garmin_pre_submit.png"))
     sb.click("button[type='submit']")
 
     # Wait up to 30s for login to complete or MFA to appear
@@ -159,7 +160,7 @@ def _do_login(sb):
         sb.get_page_source()
 
         if i % 5 == 4:  # screenshot every 5s
-            sb.save_screenshot(f"/tmp/garmin_login_{i}.png")
+            sb.save_screenshot(str(Path(tempfile.gettempdir()) / f"garmin_login_{i}.png"))
             print(f"  [{i+1}s] URL: {url[:100]}")
 
         # Check for MFA input field — Garmin's email MFA page has "Security Code" label
@@ -182,7 +183,7 @@ def _do_login(sb):
                 )
                 for inp in inputs:
                     if inp.is_displayed():
-                        sb.save_screenshot("/tmp/garmin_mfa_page.png")
+                        sb.save_screenshot(str(Path(tempfile.gettempdir()) / "garmin_mfa_page.png"))
                         print(
                             f"MFA page — found input: name={inp.get_attribute('name')} id={inp.get_attribute('id')}"  # noqa: E501
                         )
@@ -221,7 +222,7 @@ def _do_login(sb):
         for sel in mfa_selectors:
             try:
                 if sb.is_element_visible(sel):
-                    sb.save_screenshot("/tmp/garmin_mfa_page.png")
+                    sb.save_screenshot(str(Path(tempfile.gettempdir()) / "garmin_mfa_page.png"))
                     print(f"MFA input detected: {sel}")
                     mfa = wait_for_mfa()
                     sb.type(sel, mfa)
@@ -244,7 +245,7 @@ def _do_login(sb):
         if url.startswith("https://connect.garmin.com"):
             break
 
-    sb.save_screenshot("/tmp/garmin_post_login.png")
+    sb.save_screenshot(str(Path(tempfile.gettempdir()) / "garmin_post_login.png"))
     print(f"Post-login URL: {sb.get_current_url()[:100]}")
 
     # If not on connect.garmin.com yet, navigate there to complete session
@@ -252,7 +253,7 @@ def _do_login(sb):
         print("Navigating to connect.garmin.com to complete session...")
         sb.uc_open_with_reconnect("https://connect.garmin.com/modern/", reconnect_time=3)
         sb.sleep(5)
-        sb.save_screenshot("/tmp/garmin_after_navigate.png")
+        sb.save_screenshot(str(Path(tempfile.gettempdir()) / "garmin_after_navigate.png"))
 
     # Ensure we land on the app page which contains the csrf-token meta
     if not sb.get_current_url().startswith("https://connect.garmin.com/app"):
