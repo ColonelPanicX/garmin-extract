@@ -114,6 +114,30 @@ def check_credentials() -> tuple[bool, str]:
     return False, "Not configured"
 
 
+def clear_credentials() -> tuple[bool, str]:
+    """Remove credentials from keyring and .env. Returns (ok, detail)."""
+    errors: list[str] = []
+
+    try:
+        import keyring  # noqa: PLC0415
+
+        for key in (_EMAIL_KEY, _PASSWORD_KEY):
+            try:
+                keyring.delete_password(_SERVICE, key)
+            except Exception:
+                pass  # not stored there — fine
+    except ImportError:
+        pass
+    except Exception as exc:
+        errors.append(str(exc))
+
+    _scrub_env()
+
+    if errors:
+        return False, f"Errors: {', '.join(errors)}"
+    return True, "Credentials cleared"
+
+
 def _scrub_env() -> None:
     """Remove Garmin credentials from .env after a successful keyring save."""
     if not ENV_FILE.exists():
