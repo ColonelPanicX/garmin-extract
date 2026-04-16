@@ -287,6 +287,11 @@ class CredentialsDialog(QDialog):
 
         # Buttons
         btn_layout = QHBoxLayout()
+        self._clear_btn = QPushButton("Clear Credentials")
+        self._clear_btn.setStyleSheet("color: #f38ba8;")
+        self._clear_btn.setEnabled(False)
+        self._clear_btn.clicked.connect(self._clear)
+        btn_layout.addWidget(self._clear_btn)
         btn_layout.addStretch()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
@@ -304,12 +309,13 @@ class CredentialsDialog(QDialog):
         try:
             from garmin_extract._credentials import load_credentials
 
-            email, _ = load_credentials()
+            email, password = load_credentials()
             if email:
                 self._email.setText(email)
                 self._password.setFocus()
             else:
                 self._email.setFocus()
+            self._clear_btn.setEnabled(bool(email or password))
         except Exception:
             self._email.setFocus()
 
@@ -347,6 +353,22 @@ class CredentialsDialog(QDialog):
                 self._warning.show()
 
         QTimer.singleShot(50, _apply)
+
+    def _clear(self) -> None:
+        from garmin_extract._credentials import clear_credentials
+
+        self._error.hide()
+        self._success.hide()
+        ok, detail = clear_credentials()
+        if ok:
+            self._email.clear()
+            self._password.clear()
+            self._clear_btn.setEnabled(False)
+            self._success.setText("Credentials cleared.")
+            self._success.show()
+        else:
+            self._error.setText(f"Clear failed: {detail}")
+            self._error.show()
 
     def _save(self) -> None:
         from garmin_extract._credentials import save_to_env, save_to_keyring
