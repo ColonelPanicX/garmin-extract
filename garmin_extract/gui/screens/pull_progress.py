@@ -391,6 +391,7 @@ class PullProgressDialog(QDialog):
 
     def _run_pull(self, cmd: list[str]) -> None:
         env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"  # force UTF-8 I/O in subprocess (Windows cp1252 can't encode ✓)
         if self._email:
             env["GARMIN_EMAIL"] = self._email
         if self._password:
@@ -402,7 +403,7 @@ class PullProgressDialog(QDialog):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
-                text=True,
+                encoding="utf-8",
                 cwd=str(ROOT),
                 env=env,
             )
