@@ -91,12 +91,12 @@ class _SectionCard(QFrame):
 
     def __init__(self, title: str, subtitle: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("section-card")
         self.setStyleSheet("""
-            QFrame {
+            QFrame#section-card {
                 background-color: #313244;
                 border: 1px solid #45475a;
                 border-radius: 8px;
-                padding: 16px;
             }
             """)
 
