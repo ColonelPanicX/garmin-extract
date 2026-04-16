@@ -7,8 +7,7 @@ Cloudflare never blocks us. The browser logs in once via SSO and keeps a
 persistent session; subsequent runs load the saved profile and skip login.
 
 On headless Linux (no $DISPLAY), Chrome runs inside a virtual framebuffer
-(Xvfb). On Windows, Chrome runs in headless=new mode so no browser window
-appears. On desktop Linux and macOS it runs directly.
+(Xvfb). On desktop Linux, Windows, and macOS it runs directly.
 
 Usage:
     python pullers/garmin.py                         # yesterday
@@ -638,10 +637,9 @@ def main():
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
-        # On Windows, use Chrome's newer headless mode so the browser window stays hidden.
-        # On Linux+Xvfb the virtual framebuffer already hides it, so headless=False is correct.
-        use_headless = platform.system() == "Windows"
-        with SB(uc=True, headless=use_headless, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
+        # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
+        # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
+        with SB(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
             ensure_logged_in(sb)
 
             print("Getting display name...")
