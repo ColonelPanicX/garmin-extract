@@ -7,7 +7,8 @@ Cloudflare never blocks us. The browser logs in once via SSO and keeps a
 persistent session; subsequent runs load the saved profile and skip login.
 
 On headless Linux (no $DISPLAY), Chrome runs inside a virtual framebuffer
-(Xvfb). On desktop Linux, Windows, and macOS it runs directly.
+(Xvfb). On Windows, Chrome runs in headless=new mode so no browser window
+appears. On desktop Linux and macOS it runs directly.
 
 Usage:
     python pullers/garmin.py                         # yesterday
@@ -100,9 +101,9 @@ def wait_for_mfa() -> str:
     MFA_FILE.unlink(missing_ok=True)
     print("=" * 50)
     print(f"Run: echo YOUR_CODE > {MFA_FILE}")
-    print("Waiting up to 5 minutes...")
+    print("Waiting up to 30 minutes...")
     print("=" * 50)
-    for _ in range(300):
+    for _ in range(1800):
         if MFA_FILE.exists():
             code = MFA_FILE.read_text().strip()
             MFA_FILE.unlink(missing_ok=True)
@@ -637,7 +638,10 @@ def main():
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
-        with SB(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
+        # On Windows, use Chrome's newer headless mode so the browser window stays hidden.
+        # On Linux+Xvfb the virtual framebuffer already hides it, so headless=False is correct.
+        use_headless = platform.system() == "Windows"
+        with SB(uc=True, headless=use_headless, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
             ensure_logged_in(sb)
 
             print("Getting display name...")
