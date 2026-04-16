@@ -16,10 +16,17 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 block_cipher = None
 
 # ── Hidden imports ───────────────────────────────────────────────────────────
-# PyInstaller's static analysis misses some dynamically-imported modules.
-hiddenimports = []
+# PyInstaller's static analysis scans the main entry point, but several modules
+# are only imported by subprocess-invoked scripts (pullers/garmin.py,
+# scripts/setup_gmail_auth.py, etc.) — those imports need to be listed here so
+# they get packaged in the bundle.
+hiddenimports = [
+    "dotenv",  # pullers/garmin.py — loads .env credentials
+    "requests_oauthlib",  # scripts/setup_gmail_auth.py — Gmail OAuth flow
+]
 hiddenimports += collect_submodules("seleniumbase")
 hiddenimports += collect_submodules("google.auth")
+hiddenimports += collect_submodules("google.oauth2")  # pullers/_gmail_mfa.py
 hiddenimports += collect_submodules("googleapiclient")
 hiddenimports += collect_submodules("google_auth_oauthlib")
 hiddenimports += collect_submodules("keyring.backends")
