@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 from pathlib import Path
 from threading import Thread
 
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_WINDOWS = platform.system() == "Windows"
 
 ROOT = Path(__file__).parent.parent.parent.parent
 GMAIL_CREDS_FILE = ROOT / "google_credentials.json"
@@ -81,6 +84,7 @@ class _AutoSignals(QObject):
     gmail_done = Signal(str, str, str)  # status, detail, icon_color
     drive_auth_done = Signal(str, str)  # auth_text, last_export_text
     drive_op_done = Signal(str)  # result text
+    creds_done = Signal(bool, str)  # ok, detail
 
 
 # ── Status card (reused from setup) ─────────────────────────────────────────
@@ -173,6 +177,16 @@ class AutomationPage(QWidget):
 
         layout.addSpacing(16)
 
+        # ── Garmin Credentials card (Windows only) ────
+        self._creds_card: _SectionCard | None = None
+        if _WINDOWS:
+            self._creds_card = _SectionCard(
+                "Garmin Credentials", "Email and password for automated pulls"
+            )
+            self._creds_card.add_action_button("Configure", self._open_credentials)
+            layout.addWidget(self._creds_card)
+            layout.addSpacing(4)
+
         # ── Gmail MFA card ────────────────────────────
         self._gmail_card = _SectionCard("Gmail MFA", "Automatic MFA code retrieval from Gmail")
         layout.addWidget(self._gmail_card)
@@ -213,11 +227,39 @@ class AutomationPage(QWidget):
         self._signals.gmail_done.connect(self._on_gmail_done)
         self._signals.drive_auth_done.connect(self._on_drive_auth_done)
         self._signals.drive_op_done.connect(self._on_drive_op_done)
+        if _WINDOWS:
+            self._signals.creds_done.connect(self._on_creds_done)
         self.refresh_status()
 
     def refresh_status(self) -> None:
         Thread(target=self._check_gmail, daemon=True).start()
         Thread(target=self._check_drive, daemon=True).start()
+        if _WINDOWS:
+            Thread(target=self._check_creds, daemon=True).start()
+
+    # ── Credentials (Windows only) ────────────────────────────────────────
+
+    def _check_creds(self) -> None:
+        from garmin_extract._credentials import check_credentials
+
+        ok, detail = check_credentials()
+        self._signals.creds_done.emit(ok, detail)
+
+    def _on_creds_done(self, ok: bool, detail: str) -> None:
+        if self._creds_card is None:
+            return
+        import re
+
+        clean = re.sub(r"\[/?[^\]]*\]", "", detail)
+        color = "#a6e3a1" if ok else "#6c7086"
+        self._creds_card.set_status(("\u2713 " if ok else "") + clean, color)
+
+    def _open_credentials(self) -> None:
+        from garmin_extract.gui.screens.setup import CredentialsDialog
+
+        dlg = CredentialsDialog(self)
+        dlg.exec()
+        self.refresh_status()
 
     def _check_gmail(self) -> None:
         status, detail = _check_gmail_automation()
