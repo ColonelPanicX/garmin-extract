@@ -759,6 +759,76 @@ def build_csvs() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 7. Drive / Sheets export
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _run_drive_export(drive: bool, sheets: bool) -> None:
+    """Shared runner for Drive/Sheets export — prints results inline."""
+    from garmin_extract._google_drive import sync_to_sheets, upload_csvs_to_drive
+
+    if drive:
+        print("  Uploading CSVs to Google Drive...")
+        result = upload_csvs_to_drive()
+        if result["ok"]:
+            names = ", ".join(f["name"] for f in result["files"])
+            console.print(f"  [green]✓[/]  Uploaded: {names}")
+            console.print(f"  [dim]  {result['folder_link']}[/]")
+        else:
+            console.print(f"  [red]✗[/]  Drive error: {result['error']}")
+
+    if sheets:
+        print("  Syncing to Google Sheets...")
+        result = sync_to_sheets()
+        if result["ok"]:
+            console.print("  [green]✓[/]  Sheet updated.")
+            console.print(f"  [dim]  {result['sheet_url']}[/]")
+        else:
+            console.print(f"  [red]✗[/]  Sheets error: {result['error']}")
+
+
+def push_to_drive() -> None:
+    header("Upload to Google Drive")
+    print("  Uploads garmin_daily.csv and garmin_activities.csv to")
+    print("  a 'Garmin Extract' folder in your Google Drive.\n")
+    go = prompt_with_navigation("  Upload now? [Y/n]: ")
+    if go.lower() == "n":
+        print("  Cancelled.")
+        _continue()
+        return
+    print()
+    _run_drive_export(drive=True, sheets=False)
+    _continue()
+
+
+def push_to_sheets() -> None:
+    header("Sync to Google Sheets")
+    print("  Creates or updates a 'Garmin Data' Google Sheet with")
+    print("  Daily and Activities tabs.\n")
+    go = prompt_with_navigation("  Sync now? [Y/n]: ")
+    if go.lower() == "n":
+        print("  Cancelled.")
+        _continue()
+        return
+    print()
+    _run_drive_export(drive=False, sheets=True)
+    _continue()
+
+
+def push_to_both() -> None:
+    header("Upload to Drive + Sync Sheets")
+    print("  Uploads CSVs to Drive and updates the Google Sheet.\n")
+    go = prompt_with_navigation("  Run both now? [Y/n]: ")
+    if go.lower() == "n":
+        print("  Cancelled.")
+        _continue()
+        return
+    print()
+    _run_drive_export(drive=True, sheets=True)
+    _continue()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Menu rendering
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -841,6 +911,10 @@ def menu_automation() -> None:
         [
             ("", "─── Unattended MFA ─────────────────────────────────", None),
             ("1", "Set up Gmail MFA  (auto-handle Garmin security codes)", setup_gmail_mfa),
+            ("", "─── Google Drive / Sheets ───────────────────────────", None),
+            ("2", "Upload CSVs to Google Drive", push_to_drive),
+            ("3", "Sync to Google Sheets", push_to_sheets),
+            ("4", "Upload to Drive + Sync Sheets", push_to_both),
         ],
     )
 
