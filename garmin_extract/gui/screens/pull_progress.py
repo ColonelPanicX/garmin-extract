@@ -101,7 +101,11 @@ class _MfaDialog(QDialog):
 
 
 class _RuntimeCredsDialog(QDialog):
-    """Dialog for entering credentials at runtime when none are saved."""
+    """Dialog for entering credentials at runtime when none are saved.
+
+    Defaults to the manual-login path. The credentials form is revealed
+    only when the user opts into configuring auto login.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -117,42 +121,78 @@ class _RuntimeCredsDialog(QDialog):
         layout.setSpacing(10)
 
         hint = QLabel(
-            "No saved credentials found. Enter them below, or log in manually in the browser."
+            "No saved credentials found. Log in manually in the browser, "
+            "or configure auto login to save credentials for future runs."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #6c7086;")
         layout.addWidget(hint)
 
-        layout.addWidget(QLabel("Email"))
+        # Auto-login form — hidden until the user opts in
+        self._form = QWidget()
+        form_layout = QVBoxLayout(self._form)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(10)
+
+        form_layout.addWidget(QLabel("Email"))
         self._email = QLineEdit()
         self._email.setPlaceholderText("you@example.com")
-        layout.addWidget(self._email)
+        form_layout.addWidget(self._email)
 
-        layout.addWidget(QLabel("Password"))
+        form_layout.addWidget(QLabel("Password"))
         self._password = QLineEdit()
         self._password.setEchoMode(QLineEdit.EchoMode.Password)
         self._password.setPlaceholderText("Garmin Connect password")
         self._password.returnPressed.connect(self._submit)
-        layout.addWidget(self._password)
+        form_layout.addWidget(self._password)
 
         self._error = QLabel()
         self._error.setStyleSheet("color: #f38ba8;")
         self._error.hide()
-        layout.addWidget(self._error)
+        form_layout.addWidget(self._error)
 
-        btn_layout = QHBoxLayout()
+        self._form.hide()
+        layout.addWidget(self._form)
+
+        # Two button rows — one visible at a time
+        self._initial_btns_widget = QWidget()
+        initial_btns = QHBoxLayout(self._initial_btns_widget)
+        initial_btns.setContentsMargins(0, 0, 0, 0)
+        configure = QPushButton("Configure auto login")
+        configure.setStyleSheet("color: #89b4fa;")
+        configure.clicked.connect(self._show_form)
+        initial_btns.addWidget(configure)
+        initial_btns.addStretch()
+        cancel1 = QPushButton("Cancel")
+        cancel1.clicked.connect(self.reject)
+        initial_btns.addWidget(cancel1)
         manual = QPushButton("Log in manually")
-        manual.setStyleSheet("color: #89b4fa;")
+        manual.setDefault(True)
         manual.clicked.connect(self._use_manual)
-        btn_layout.addWidget(manual)
-        btn_layout.addStretch()
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel)
-        ok = QPushButton("Continue")
-        ok.clicked.connect(self._submit)
-        btn_layout.addWidget(ok)
-        layout.addLayout(btn_layout)
+        initial_btns.addWidget(manual)
+        layout.addWidget(self._initial_btns_widget)
+
+        self._form_btns_widget = QWidget()
+        form_btns = QHBoxLayout(self._form_btns_widget)
+        form_btns.setContentsMargins(0, 0, 0, 0)
+        form_btns.addStretch()
+        cancel2 = QPushButton("Cancel")
+        cancel2.clicked.connect(self.reject)
+        form_btns.addWidget(cancel2)
+        self._save_btn = QPushButton("Save & continue")
+        self._save_btn.setDefault(True)
+        self._save_btn.clicked.connect(self._submit)
+        form_btns.addWidget(self._save_btn)
+        self._form_btns_widget.hide()
+        layout.addWidget(self._form_btns_widget)
+
+    def _show_form(self) -> None:
+        """Reveal the auto-login form and swap the button row."""
+        self._form.show()
+        self._initial_btns_widget.hide()
+        self._form_btns_widget.show()
+        self._email.setFocus()
+        self.adjustSize()
 
     def _submit(self) -> None:
         email = self._email.text().strip()
