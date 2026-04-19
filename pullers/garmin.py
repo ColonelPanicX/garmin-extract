@@ -63,6 +63,9 @@ def has_display() -> bool:
     return bool(os.environ.get("DISPLAY"))
 
 
+from garmin_extract._browser import detect_windows_browser  # noqa: E402
+
+
 def start_xvfb(display=":99"):
     proc = subprocess.Popen(
         ["Xvfb", display, "-screen", "0", "1280x720x24"],
@@ -668,12 +671,22 @@ def main():
         print("Starting Xvfb...")
         xvfb = start_xvfb()
 
+    browser_bin = None
+    if platform.system() == "Windows":
+        browser_bin = detect_windows_browser()
+        if browser_bin is None:
+            print("ERROR: No supported browser found. Install Chrome, Brave, or Edge and retry.")
+            sys.exit(1)
+
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
         # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
         # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
-        with SB(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
+        sb_kwargs = dict(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR))
+        if browser_bin:
+            sb_kwargs["binary_location"] = browser_bin
+        with SB(**sb_kwargs) as sb:
             ensure_logged_in(sb, email, password)
 
             print("Getting display name...")
