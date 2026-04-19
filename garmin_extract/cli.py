@@ -32,10 +32,11 @@ def _is_tui_capable() -> bool:
     # Explicit opt-outs
     if os.environ.get("CI") or os.environ.get("GARMIN_NO_TUI"):
         return False
-    # Dumb / missing terminal
-    term = os.environ.get("TERM", "")
-    if term in ("dumb", ""):
-        return False
+    # TERM is a Unix concept — Windows PowerShell/cmd don't set it, but Textual works fine there
+    if sys.platform != "win32":
+        term = os.environ.get("TERM", "")
+        if term in ("dumb", ""):
+            return False
     # No TTY (e.g. piped output, cron)
     if not sys.stdout.isatty():
         return False
