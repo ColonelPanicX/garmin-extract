@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime
 
 from garmin_extract import __version__
 
@@ -76,6 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Increase verbosity (stackable: -vv)",
     )
     parser.add_argument(
+        "--pull",
+        action="store_true",
+        help=(
+            "Pull yesterday's data, rebuild CSVs, and optionally push to "
+            "Drive/Sheets. Non-interactive — safe for cron and Task Scheduler."
+        ),
+    )
+    parser.add_argument(
         "--push-drive",
         action="store_true",
         help="Upload CSV reports to Google Drive (non-interactive, safe for cron)",
@@ -119,8 +128,45 @@ def _run_export(push_drive: bool, push_sheets: bool) -> None:
     sys.exit(exit_code)
 
 
+def _run_scheduled_pull(push_drive: bool, push_sheets: bool) -> None:
+    """Run the full scheduled-pull sequence: pull yesterday, build CSVs, optional export.
+
+    Mirrors scripts/pull-garmin.sh for Windows Task Scheduler. Exits 0 if every
+    stage succeeds, 1 on any failure.
+    """
+    import subprocess
+
+    from garmin_extract._paths import app_root, bundle_root
+
+    scripts_root = bundle_root()
+    cwd = str(app_root())
+    puller = str(scripts_root / "pullers" / "garmin.py")
+    csv_builder = str(scripts_root / "reports" / "build_garmin_csvs.py")
+
+    print(f"[pull] {datetime.now().isoformat(timespec='seconds')}", flush=True)
+    pull = subprocess.run([sys.executable, "-u", puller], cwd=cwd)
+    if pull.returncode != 0:
+        print(f"Pull failed (exit {pull.returncode})", file=sys.stderr)
+        sys.exit(1)
+
+    csv = subprocess.run([sys.executable, "-u", csv_builder], cwd=cwd)
+    if csv.returncode != 0:
+        print(f"CSV build failed (exit {csv.returncode})", file=sys.stderr)
+        sys.exit(1)
+
+    if push_drive or push_sheets:
+        _run_export(push_drive=push_drive, push_sheets=push_sheets)
+        return  # _run_export calls sys.exit
+
+    sys.exit(0)
+
+
 def main() -> None:
     args = build_parser().parse_args()
+
+    if args.pull:
+        _run_scheduled_pull(push_drive=args.push_drive, push_sheets=args.push_sheets)
+        return  # _run_scheduled_pull calls sys.exit
 
     if args.push_drive or args.push_sheets:
         _run_export(push_drive=args.push_drive, push_sheets=args.push_sheets)

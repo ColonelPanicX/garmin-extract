@@ -8,9 +8,10 @@ import shutil
 from pathlib import Path
 from threading import Thread
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTime, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -90,6 +92,7 @@ class _AutoSignals(QObject):
     drive_auth_done = Signal(str, str)  # auth_text, last_export_text
     drive_op_done = Signal(str)  # result text
     creds_done = Signal(bool, str)  # ok, detail
+    sched_done = Signal(bool, str)  # installed, detail
 
 
 # ── Status card (reused from setup) ─────────────────────────────────────────
@@ -389,6 +392,135 @@ class _GmailSetupDialog(QDialog):
             self._show_error(f"Token exchange failed: {detail}")
 
 
+# ── Scheduled Pulls dialog ───────────────────────────────────────────────────
+
+
+class _ScheduledPullsDialog(QDialog):
+    """Configure a daily Windows Task Scheduler entry that runs a pull at a
+    user-chosen time, optionally followed by Drive/Sheets export.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Scheduled Pulls")
+        self.setMinimumWidth(480)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        intro = QLabel(
+            "Schedule a daily pull via Windows Task Scheduler. The task runs "
+            "garmin-extract with --pull at the time you choose."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #6c7086;")
+        layout.addWidget(intro)
+
+        self._status = QLabel("Checking current schedule…")
+        self._status.setStyleSheet("color: #cdd6f4; margin-top: 4px;")
+        layout.addWidget(self._status)
+
+        # ── Time picker ──
+        time_row = QHBoxLayout()
+        time_row.addWidget(QLabel("Run daily at"))
+        self._time_edit = QTimeEdit()
+        self._time_edit.setDisplayFormat("HH:mm")
+        self._time_edit.setTime(QTime(6, 0))
+        time_row.addWidget(self._time_edit)
+        time_row.addStretch()
+        layout.addLayout(time_row)
+
+        # ── Export toggles ──
+        self._push_drive = QCheckBox("Upload CSVs to Google Drive after pull")
+        layout.addWidget(self._push_drive)
+
+        self._push_sheets = QCheckBox("Sync CSVs to Google Sheets after pull")
+        layout.addWidget(self._push_sheets)
+
+        self._error = QLabel()
+        self._error.setWordWrap(True)
+        self._error.hide()
+        layout.addWidget(self._error)
+
+        # ── Buttons ──
+        btn_row = QHBoxLayout()
+        self._disable_btn = QPushButton("Disable")
+        self._disable_btn.clicked.connect(self._on_disable)
+        self._disable_btn.setEnabled(False)
+        btn_row.addWidget(self._disable_btn)
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btn_row.addWidget(cancel)
+        self._save_btn = QPushButton("Save")
+        self._save_btn.setDefault(True)
+        self._save_btn.clicked.connect(self._on_save)
+        btn_row.addWidget(self._save_btn)
+        layout.addLayout(btn_row)
+
+        self._load_current_state()
+
+    def _load_current_state(self) -> None:
+        from garmin_extract._windows_scheduler import get_task_status, parse_flags_from_command
+
+        state = get_task_status()
+        if not state["installed"]:
+            self._status.setText("Not yet scheduled — pick a time and click Save.")
+            self._status.setStyleSheet("color: #f9e2af;")
+            return
+
+        start = state.get("start_time") or ""
+        next_run = state.get("next_run_time") or ""
+        self._status.setText(
+            f"✓ Scheduled daily at {start}" + (f"  (next run: {next_run})" if next_run else "")
+        )
+        self._status.setStyleSheet("color: #a6e3a1;")
+        self._disable_btn.setEnabled(True)
+
+        # Pre-fill time + flags from the installed task
+        try:
+            hh, mm = start.split(":", 1)[0:2] if ":" in start else ("6", "0")
+            hh_int, mm_int = int(hh[:2]), int(mm[:2])
+            self._time_edit.setTime(QTime(hh_int, mm_int))
+        except Exception:
+            pass
+        cmd = state.get("task_to_run") or ""
+        if cmd:
+            drive, sheets = parse_flags_from_command(cmd)
+            self._push_drive.setChecked(drive)
+            self._push_sheets.setChecked(sheets)
+
+    def _show_error(self, msg: str) -> None:
+        self._error.setText(msg)
+        self._error.setStyleSheet("color: #f38ba8;")
+        self._error.show()
+
+    def _on_save(self) -> None:
+        from garmin_extract._windows_scheduler import create_or_update_task
+
+        t = self._time_edit.time()
+        ok, detail = create_or_update_task(
+            hour=t.hour(),
+            minute=t.minute(),
+            push_drive=self._push_drive.isChecked(),
+            push_sheets=self._push_sheets.isChecked(),
+        )
+        if ok:
+            self.accept()
+        else:
+            self._show_error(f"Could not schedule: {detail}")
+
+    def _on_disable(self) -> None:
+        from garmin_extract._windows_scheduler import delete_task
+
+        ok, detail = delete_task()
+        if ok:
+            self.accept()
+        else:
+            self._show_error(f"Could not remove scheduled task: {detail}")
+
+
 # ── Automation page ──────────────────────────────────────────────────────────
 
 
@@ -432,9 +564,12 @@ class AutomationPage(QWidget):
         # ── Scheduled Pulls card ──────────────────────
         self._sched_card = _SectionCard(
             "Scheduled Pulls",
-            "Windows Task Scheduler — coming in issue #31",
+            "Run a daily pull automatically via Windows Task Scheduler",
         )
-        self._sched_card.set_status("Not yet implemented", "#6c7086")
+        if _WINDOWS:
+            self._sched_card.add_action_button("Configure", self._open_scheduled_pulls)
+        else:
+            self._sched_card.set_status("Available on Windows only", "#6c7086")
         layout.addWidget(self._sched_card)
 
         layout.addSpacing(4)
@@ -465,6 +600,7 @@ class AutomationPage(QWidget):
         self._signals.drive_op_done.connect(self._on_drive_op_done)
         if _WINDOWS:
             self._signals.creds_done.connect(self._on_creds_done)
+            self._signals.sched_done.connect(self._on_sched_done)
         self.refresh_status()
 
     def refresh_status(self) -> None:
@@ -472,6 +608,7 @@ class AutomationPage(QWidget):
         Thread(target=self._check_drive, daemon=True).start()
         if _WINDOWS:
             Thread(target=self._check_creds, daemon=True).start()
+            Thread(target=self._check_sched, daemon=True).start()
 
     # ── Credentials (Windows only) ────────────────────────────────────────
 
@@ -499,6 +636,30 @@ class AutomationPage(QWidget):
 
     def _open_gmail_setup(self) -> None:
         dlg = _GmailSetupDialog(self)
+        dlg.exec()
+        self.refresh_status()
+
+    # ── Scheduled Pulls (Windows only) ───────────────────────────────────
+
+    def _check_sched(self) -> None:
+        from garmin_extract._windows_scheduler import get_task_status
+
+        state = get_task_status()
+        if state["installed"]:
+            start = state.get("start_time") or ""
+            detail = f"Scheduled daily at {start}" if start else "Scheduled"
+            self._signals.sched_done.emit(True, detail)
+        else:
+            self._signals.sched_done.emit(False, "Not scheduled")
+
+    def _on_sched_done(self, installed: bool, detail: str) -> None:
+        if installed:
+            self._sched_card.set_status("\u2713 " + detail, "#a6e3a1")
+        else:
+            self._sched_card.set_status(detail, "#6c7086")
+
+    def _open_scheduled_pulls(self) -> None:
+        dlg = _ScheduledPullsDialog(self)
         dlg.exec()
         self.refresh_status()
 
