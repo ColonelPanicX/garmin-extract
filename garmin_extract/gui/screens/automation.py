@@ -173,6 +173,73 @@ _OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+_GOOGLE_CLOUD_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials"
+
+
+class _CredentialsHelpDialog(QDialog):
+    """Step-by-step guide to obtain a google_credentials.json file from the
+    Google Cloud Console.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Where do I get google_credentials.json?")
+        self.setMinimumWidth(540)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        intro = QLabel(
+            "You need an OAuth client from Google Cloud Console. It's a one-time "
+            "setup that takes about 5 minutes."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #cdd6f4;")
+        layout.addWidget(intro)
+
+        steps_html = (
+            "<ol style='margin-left: -20px;'>"
+            f"<li>Open the <a href='{_GOOGLE_CLOUD_CREDENTIALS_URL}' style='color: #89b4fa;'>"
+            "Google Cloud Console credentials page</a> and sign in.</li>"
+            "<li>Create or select a project (any name works — it's just for you).</li>"
+            "<li>Enable the <b>Gmail API</b> for the project. "
+            "If you also want Drive / Sheets export, enable those APIs too.</li>"
+            "<li>Open the <b>OAuth consent screen</b> — choose <b>External</b>, "
+            "fill in the required fields, and add yourself as a <b>test user</b>.</li>"
+            "<li>Back on the Credentials page, click <b>Create Credentials → "
+            "OAuth client ID</b>. Application type: <b>Desktop app</b>.</li>"
+            "<li>Click <b>Download JSON</b> on the new client. That's your "
+            "<code>google_credentials.json</code>.</li>"
+            "<li>Return here and click <b>Browse…</b> to select the file.</li>"
+            "</ol>"
+        )
+        steps = QLabel(steps_html)
+        steps.setWordWrap(True)
+        steps.setTextFormat(Qt.TextFormat.RichText)
+        steps.setOpenExternalLinks(True)
+        steps.setStyleSheet("color: #cdd6f4; font-size: 13px;")
+        layout.addWidget(steps)
+
+        note = QLabel(
+            "This data stays local — the token file is written to the app directory "
+            "and never leaves your machine."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #6c7086; font-size: 12px;")
+        layout.addWidget(note)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        open_btn = QPushButton("Open Google Cloud Console")
+        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(_GOOGLE_CLOUD_CREDENTIALS_URL))
+        btn_row.addWidget(open_btn)
+        close_btn = QPushButton("Close")
+        close_btn.setDefault(True)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
 
 class _GmailSetupSignals(QObject):
     token_done = Signal(bool, str)  # ok, detail
@@ -207,9 +274,21 @@ class _GmailSetupDialog(QDialog):
         layout.addWidget(intro)
 
         # ── Step 1: credentials file ──
+        step1_row = QHBoxLayout()
         step1 = QLabel("Step 1 — Google credentials file")
         step1.setStyleSheet("font-weight: bold; color: #cdd6f4; margin-top: 8px;")
-        layout.addWidget(step1)
+        step1_row.addWidget(step1)
+        step1_row.addStretch()
+        help_btn = QPushButton("How do I get this?")
+        help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        help_btn.setFlat(True)
+        help_btn.setStyleSheet(
+            "QPushButton { color: #89b4fa; border: none; text-decoration: underline; }"
+            "QPushButton:hover { color: #b4befe; }"
+        )
+        help_btn.clicked.connect(self._open_credentials_help)
+        step1_row.addWidget(help_btn)
+        layout.addLayout(step1_row)
 
         creds_row = QHBoxLayout()
         self._creds_status = QLabel()
@@ -283,6 +362,9 @@ class _GmailSetupDialog(QDialog):
         self._error.setText(msg)
         self._error.setStyleSheet("color: #89b4fa;")
         self._error.show()
+
+    def _open_credentials_help(self) -> None:
+        _CredentialsHelpDialog(self).exec()
 
     # ── Step 1 ──
     def _browse_for_creds(self) -> None:
