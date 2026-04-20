@@ -107,7 +107,6 @@ class _LatestSyncCard(QWidget):
         layout.setSpacing(4)
         layout.addWidget(_SectionHeader("LATEST SYNC"))
         self._status = QLabel()
-        self._status.setWordWrap(True)
         layout.addWidget(self._status)
         self.refresh()
 
