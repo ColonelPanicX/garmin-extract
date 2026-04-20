@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QTimeEdit,
     QVBoxLayout,
     QWidget,
@@ -139,6 +140,7 @@ class _SectionCard(QFrame):
     def add_action_button(self, label: str, callback: object) -> QPushButton:
         btn = QPushButton(label)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setMinimumHeight(32)
         btn.setStyleSheet("""
             QPushButton {
                 padding: 6px 14px;
@@ -530,7 +532,22 @@ class AutomationPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        layout = QVBoxLayout(self)
+        # Wrap content in a scroll area so the page gracefully scrolls when
+        # cards + buttons exceed the viewport height instead of compressing.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(40, 32, 40, 32)
         layout.setSpacing(8)
 
