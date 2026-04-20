@@ -26,8 +26,9 @@ Once logged in, Chrome saves the session to a local browser profile and reuses i
 
 **Optional automation:**
 - Fully automatic MFA via Gmail API — the tool reads your Garmin security code from Gmail so session renewals require no human action
-- Scheduled daily pulls configured from inside the TUI
-- Google Drive / Sheets sync triggered on demand from the Automation screen
+- **Scheduled Pulls on Windows** via Task Scheduler — pick a time in the GUI, optionally bundle Drive / Sheets export, fully unattended thereafter
+- **Scheduled Pulls on Linux** via `cron` using `scripts/pull-garmin.sh`
+- **Google Drive / Sheets export** triggered on demand or as part of a scheduled pull — archive raw CSVs to a Drive folder of your choice *and / or* populate a live Google Sheet for dashboards and sharing
 
 ## Requirements
 
@@ -303,6 +304,57 @@ Garmin's API endpoints are reverse-engineered from the Connect SPA and may chang
 - The API endpoints are **reverse-engineered from the Garmin Connect SPA**. They may change with Garmin app updates. If metrics start returning 404/empty responses, the endpoints may need to be re-mapped using Chrome DevTools → Network tab.
 
 ## Changelog
+
+### v1.6.0 — 2026-04-20 — Windows GUI polish, Scheduled Pulls, export UX
+
+A session of iterative UAT on Windows turned into a big step forward for the GUI. The headline additions are **Scheduled Pulls** on Windows (no more editing `.env` and opening Task Scheduler by hand), a much clearer **Drive / Sheets export** story, and a pile of small-but-important UX fixes.
+
+**Scheduled Pulls (Windows)** — Automation → Scheduled Pulls → Configure:
+- Time picker plus optional Drive / Sheets export on the same dialog
+- Backed by Windows Task Scheduler via the `schtasks` CLI. `schtasks /create` on Save, `schtasks /delete` on Disable, `schtasks /query` to show current state
+- New `--pull` flag on the `garmin-extract` CLI mirrors `scripts/pull-garmin.sh`: pulls yesterday, rebuilds CSVs, optionally runs `--push-drive` / `--push-sheets`. Non-interactive, exits 0/1 — safe for cron and Task Scheduler alike
+- Auto-detects frozen vs source mode so the scheduled command resolves to either `garmin-extract.exe --pull` or `.venv\Scripts\python.exe -m garmin_extract --pull`
+- Dialog pre-fills time and export flags from the installed task when reopened
+
+**Login UX overhaul** (Pull Data → Fetch new with no saved creds):
+- Dialog now defaults to **manual** browser login — the form for saving credentials is hidden behind a secondary "Configure auto login" button (progressive disclosure). First-time users aren't pushed into credential configuration they may not want
+- Cancel on this dialog now actually cancels. Previously the cred check ran inside `__init__` before `exec()` had started the parent dialog's event loop, so `self.reject()` had no event loop to end and the pull would proceed anyway. Fixed with `QTimer.singleShot(0, ...)`
+
+**Latest Sync header** (Pull Data screen):
+- New section at the top showing the most recent local data date and days-behind
+- Green `(up to date)` when latest ≥ yesterday, amber `(N days out of sync)` otherwise
+- Empty state: "No local data — run Fetch new to start"
+- Refreshes in place after any pull — no app restart needed
+
+**Gmail MFA setup is now GUI-first**:
+- New Configure button on the Gmail MFA card opens a 3-step wizard — browse for `google_credentials.json`, open the authorization URL, paste the resulting code. Token exchange runs on a background thread so the UI stays responsive
+- "How do I get this?" link opens a help dialog with 7 numbered steps for obtaining an OAuth Desktop app credentials file from Google Cloud Console, plus an "Open Google Cloud Console" button
+- Reuses the same `requests_oauthlib` logic as `scripts/setup_gmail_auth.py`, so CLI and GUI stay in sync
+
+**Drive / Sheets export refinements**:
+- Clearer checkbox copy: **Archive raw CSV files to Google Drive** vs **Populate Google Sheet with data (for viewing/charting)**
+- Small `?` help popovers next to each option explain the difference — archival raw files versus live dashboard
+- Local-save note under the checkboxes: CSVs are always saved to `reports/` first; the export options are additive
+- **Hierarchical Drive folder picker**. Browse from My Drive down into subfolders, filter within the current level, click "Select this folder" to choose any level. Replaces the previous flat listing that capped at 200 folders and was slow to scroll
+- README §5 rewritten with an "archival vs live dashboard" framing and a "which do I pick" decision table
+
+**Auto-login resilience**:
+- New `_probe_email_field()` checks URL, selector presence, and whether the field is empty before attempting to type. If anything looks off — slow page load, user already typing, Cloudflare interstitial — `_do_login` hands off to `_wait_for_manual_login` instead of the 10-second blind wait that previously ended in a `NoSuchElementException`
+- Top-level exception handler in `ensure_logged_in` surfaces failures as a single-line readable error plus a screenshot path to stderr, rather than a raw Python traceback in the GUI log panel
+
+**Security**:
+- MFA code is no longer printed to logs on successful Gmail retrieval. The one-time code was appearing verbatim in GUI log panels and cron log files — replaced with "MFA obtained."
+
+**GUI plumbing fixes**:
+- Automation page wrapped in a `QScrollArea` so content overflow no longer compresses every action button to unreadable height
+- Action buttons now have `setMinimumHeight(32)` as a defensive floor
+- Latest Sync label renders fully on first paint — CSS padding on a `QLabel` doesn't show up in `sizeHint`, so padding was moved from the stylesheet into layout spacing
+- `_is_tui_capable()` no longer checks `TERM` on Windows (PowerShell and cmd don't set it; Textual works fine there)
+
+**Known issue**:
+- Chrome may fail with "failed to close window in 20 seconds" on startup during SeleniumBase UC mode's close / reopen cycle. Brave and Edge work cleanly. Tracked in #74 — under investigation. If you hit it, switching the browser detection order (Brave installed alongside Chrome) is the current workaround.
+
+---
 
 ### v1.3.0 — 2026-04-15 — Navigation, keyring credentials, Fetch New
 
