@@ -198,10 +198,10 @@ class _CredentialsHelpDialog(QDialog):
         intro.setStyleSheet("color: #cdd6f4;")
         layout.addWidget(intro)
 
-        steps = QLabel(
+        steps_html = (
             "<ol style='margin-left: -20px;'>"
-            "<li>Open the <a href='{url}' style='color: #89b4fa;'>Google Cloud "
-            "Console credentials page</a> and sign in.</li>"
+            f"<li>Open the <a href='{_GOOGLE_CLOUD_CREDENTIALS_URL}' style='color: #89b4fa;'>"
+            "Google Cloud Console credentials page</a> and sign in.</li>"
             "<li>Create or select a project (any name works — it's just for you).</li>"
             "<li>Enable the <b>Gmail API</b> for the project. "
             "If you also want Drive / Sheets export, enable those APIs too.</li>"
@@ -213,7 +213,8 @@ class _CredentialsHelpDialog(QDialog):
             "<code>google_credentials.json</code>.</li>"
             "<li>Return here and click <b>Browse…</b> to select the file.</li>"
             "</ol>"
-        ).format(url=_GOOGLE_CLOUD_CREDENTIALS_URL)
+        )
+        steps = QLabel(steps_html)
         steps.setWordWrap(True)
         steps.setTextFormat(Qt.TextFormat.RichText)
         steps.setOpenExternalLinks(True)
