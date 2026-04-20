@@ -140,6 +140,49 @@ def get_or_create_folder(creds, name: str = "Garmin Extract") -> str:
     return folder["id"]
 
 
+def list_folder_children(creds, parent_id: str = "root") -> list[dict[str, str]]:
+    """List direct child folders of *parent_id*. Returns [{id, name}, ...]
+    sorted by name. Use 'root' as the parent_id for My Drive top level.
+
+    Paginates internally up to a generous cap so large folders still load.
+    """
+    svc = _drive_service(creds)
+    q = (
+        f"'{parent_id}' in parents and "
+        "mimeType='application/vnd.google-apps.folder' and trashed=false"
+    )
+    out: list[dict[str, str]] = []
+    page_token: str | None = None
+    for _ in range(10):  # up to 10 pages of 1000 = 10,000 children
+        resp = (
+            svc.files()
+            .list(
+                q=q,
+                fields="nextPageToken, files(id, name)",
+                pageSize=1000,
+                orderBy="name",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for f in resp.get("files", []):
+            out.append({"id": f["id"], "name": f["name"]})
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return out
+
+
+def get_folder_name(creds, folder_id: str) -> str:
+    """Return the display name of a folder ID, or empty string on failure."""
+    try:
+        svc = _drive_service(creds)
+        info = svc.files().get(fileId=folder_id, fields="name").execute()
+        return info.get("name", "")
+    except Exception:
+        return ""
+
+
 def upload_csv(creds, csv_path: Path, folder_id: str) -> tuple[str, str]:
     """
     Upload *csv_path* to *folder_id*, updating in-place if it already exists.

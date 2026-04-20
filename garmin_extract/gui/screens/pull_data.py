@@ -58,6 +58,26 @@ def _find_fetch_new_range() -> tuple[str, int] | None:
     return start.isoformat(), (yesterday - start).days + 1
 
 
+def _get_latest_sync_status() -> tuple[str, int] | None:
+    """Returns (latest_iso, days_behind). None if no local data.
+
+    days_behind is 0 when latest ≥ yesterday (in sync), otherwise the
+    count of days between the latest local record and yesterday.
+    """
+    import re
+
+    data_dir = Path(__file__).parent.parent.parent.parent / "data" / "garmin"
+    if not data_dir.exists():
+        return None
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
+    dates = sorted(f.stem for f in data_dir.glob("*.json") if date_re.match(f.name))
+    if not dates:
+        return None
+    latest = date.fromisoformat(dates[-1])
+    yesterday = date.today() - timedelta(days=1)
+    return dates[-1], max(0, (yesterday - latest).days)
+
+
 # ── Section header widget ────────────────────────────────────────────────────
 
 
@@ -71,6 +91,42 @@ class _SectionHeader(QLabel):
             " letter-spacing: 1px; background: transparent;"
             " border-bottom: 1px solid #45475a; padding-bottom: 4px;"
         )
+
+
+# ── Latest Sync card ─────────────────────────────────────────────────────────
+
+
+class _LatestSyncCard(QWidget):
+    """Shows the most recent local data date and staleness. Call refresh()
+    after a pull to update."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(_SectionHeader("LATEST SYNC"))
+        self._status = QLabel()
+        layout.addWidget(self._status)
+        layout.addSpacing(4)
+        self.refresh()
+
+    def refresh(self) -> None:
+        result = _get_latest_sync_status()
+        if result is None:
+            text = "No local data — run Fetch new to start"
+            color = "#f9e2af"
+        else:
+            date_iso, days = result
+            if days == 0:
+                text = f"{date_iso}  (up to date)"
+                color = "#a6e3a1"
+            else:
+                word = "day" if days == 1 else "days"
+                text = f"{date_iso}  ({days} {word} out of sync)"
+                color = "#f9e2af"
+        self._status.setText(text)
+        self._status.setStyleSheet(f"font-size: 14px; color: {color}; background: transparent;")
 
 
 # ── Action button widget ─────────────────────────────────────────────────────
@@ -211,6 +267,12 @@ class PullDataPage(QWidget):
 
         layout.addSpacing(16)
 
+        # ── LATEST SYNC ───────────────────────────────
+        self._latest_sync = _LatestSyncCard()
+        layout.addWidget(self._latest_sync)
+
+        layout.addSpacing(8)
+
         # ── SYNC ──────────────────────────────────────
         layout.addWidget(_SectionHeader("SYNC"))
         btn = _ActionButton("Fetch new", "pull all dates not yet in local data")
@@ -279,6 +341,7 @@ class PullDataPage(QWidget):
             parent=self,
         )
         dlg.exec()
+        self._latest_sync.refresh()
 
     def _fetch_new(self) -> None:
         try:

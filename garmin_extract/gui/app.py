@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import platform
 import sys
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from garmin_extract import __version__
 from garmin_extract.gui.main_window import MainWindow
@@ -17,6 +18,21 @@ def run(dry_run: bool = False, verbose: int = 0) -> None:
     app.setApplicationName("garmin-extract")
     app.setApplicationVersion(__version__)
     app.setStyleSheet(DARK_STYLESHEET)
+
+    if platform.system() == "Windows":
+        from garmin_extract._browser import detect_windows_browser
+
+        if detect_windows_browser() is None:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("No browser found")
+            msg.setText("No supported browser found.")
+            msg.setInformativeText(
+                "garmin-extract requires Chrome, Brave, or Edge.\n"
+                "Install Chrome from google.com/chrome and restart."
+            )
+            msg.exec()
+            sys.exit(1)
 
     window = MainWindow()
     window.show()

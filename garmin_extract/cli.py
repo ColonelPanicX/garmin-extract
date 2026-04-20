@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime
 
 from garmin_extract import __version__
 
@@ -32,10 +33,11 @@ def _is_tui_capable() -> bool:
     # Explicit opt-outs
     if os.environ.get("CI") or os.environ.get("GARMIN_NO_TUI"):
         return False
-    # Dumb / missing terminal
-    term = os.environ.get("TERM", "")
-    if term in ("dumb", ""):
-        return False
+    # TERM is a Unix concept — Windows PowerShell/cmd don't set it, but Textual works fine there
+    if sys.platform != "win32":
+        term = os.environ.get("TERM", "")
+        if term in ("dumb", ""):
+            return False
     # No TTY (e.g. piped output, cron)
     if not sys.stdout.isatty():
         return False
@@ -75,6 +77,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Increase verbosity (stackable: -vv)",
     )
     parser.add_argument(
+        "--pull",
+        action="store_true",
+        help=(
+            "Pull yesterday's data, rebuild CSVs, and optionally push to "
+            "Drive/Sheets. Non-interactive — safe for cron and Task Scheduler."
+        ),
+    )
+    parser.add_argument(
+        "--push-drive",
+        action="store_true",
+        help="Upload CSV reports to Google Drive (non-interactive, safe for cron)",
+    )
+    parser.add_argument(
+        "--push-sheets",
+        action="store_true",
+        help="Sync CSV reports to Google Sheets (non-interactive, safe for cron)",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -82,8 +102,75 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_export(push_drive: bool, push_sheets: bool) -> None:
+    """Run Drive/Sheets export non-interactively. Exits with 0 on success, 1 on any failure."""
+    from garmin_extract._google_drive import sync_to_sheets, upload_csvs_to_drive
+
+    exit_code = 0
+
+    if push_drive:
+        result = upload_csvs_to_drive()
+        if result["ok"]:
+            names = ", ".join(f["name"] for f in result["files"])
+            print(f"Drive: uploaded {names} → {result['folder_link']}")
+        else:
+            print(f"Drive error: {result['error']}", file=sys.stderr)
+            exit_code = 1
+
+    if push_sheets:
+        result = sync_to_sheets()
+        if result["ok"]:
+            print(f"Sheets: {result['sheet_url']}")
+        else:
+            print(f"Sheets error: {result['error']}", file=sys.stderr)
+            exit_code = 1
+
+    sys.exit(exit_code)
+
+
+def _run_scheduled_pull(push_drive: bool, push_sheets: bool) -> None:
+    """Run the full scheduled-pull sequence: pull yesterday, build CSVs, optional export.
+
+    Mirrors scripts/pull-garmin.sh for Windows Task Scheduler. Exits 0 if every
+    stage succeeds, 1 on any failure.
+    """
+    import subprocess
+
+    from garmin_extract._paths import app_root, bundle_root
+
+    scripts_root = bundle_root()
+    cwd = str(app_root())
+    puller = str(scripts_root / "pullers" / "garmin.py")
+    csv_builder = str(scripts_root / "reports" / "build_garmin_csvs.py")
+
+    print(f"[pull] {datetime.now().isoformat(timespec='seconds')}", flush=True)
+    pull = subprocess.run([sys.executable, "-u", puller], cwd=cwd)
+    if pull.returncode != 0:
+        print(f"Pull failed (exit {pull.returncode})", file=sys.stderr)
+        sys.exit(1)
+
+    csv = subprocess.run([sys.executable, "-u", csv_builder], cwd=cwd)
+    if csv.returncode != 0:
+        print(f"CSV build failed (exit {csv.returncode})", file=sys.stderr)
+        sys.exit(1)
+
+    if push_drive or push_sheets:
+        _run_export(push_drive=push_drive, push_sheets=push_sheets)
+        return  # _run_export calls sys.exit
+
+    sys.exit(0)
+
+
 def main() -> None:
     args = build_parser().parse_args()
+
+    if args.pull:
+        _run_scheduled_pull(push_drive=args.push_drive, push_sheets=args.push_sheets)
+        return  # _run_scheduled_pull calls sys.exit
+
+    if args.push_drive or args.push_sheets:
+        _run_export(push_drive=args.push_drive, push_sheets=args.push_sheets)
+        return  # _run_export calls sys.exit; this is a safety return
 
     if args.no_tui:
         from garmin_extract.menu import main as run_menu

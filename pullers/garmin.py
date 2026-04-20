@@ -63,6 +63,9 @@ def has_display() -> bool:
     return bool(os.environ.get("DISPLAY"))
 
 
+from garmin_extract._browser import detect_windows_browser  # noqa: E402
+
+
 def start_xvfb(display=":99"):
     proc = subprocess.Popen(
         ["Xvfb", display, "-screen", "0", "1280x720x24"],
@@ -88,7 +91,7 @@ def wait_for_mfa() -> str:
             print("MFA REQUIRED — polling Gmail automatically...")
             code = wait_for_mfa_gmail(timeout=300)
             if code:
-                print(f"MFA code retrieved from Gmail: {code}")
+                print("MFA obtained.")
                 return code
             print("Gmail poll failed or timed out — falling back to manual entry.")
     except ImportError:
@@ -169,6 +172,30 @@ def _wait_for_manual_login(sb) -> None:
     sys.exit(1)
 
 
+def _probe_email_field(sb) -> tuple[bool, str]:
+    """Check whether it's safe to auto-type credentials.
+
+    Returns (ready, reason). Ready means the #email field is present,
+    empty, and we are still on the sign-in page. Anything else means
+    the user (or Garmin) has already moved past the state we expect.
+    """
+    url = sb.get_current_url()
+    if "sign-in" not in url and "sso.garmin.com" not in url:
+        return False, f"already past sign-in page ({url[:80]})"
+    try:
+        if not sb.is_element_present("#email"):
+            return False, "email field not present (DOM may have changed)"
+    except Exception as exc:
+        return False, f"could not probe email field: {exc}"
+    try:
+        existing = sb.get_value("#email") or ""
+    except Exception:
+        existing = ""
+    if existing.strip():
+        return False, "user has already started entering credentials"
+    return True, ""
+
+
 def _do_login(sb, email: str, password: str) -> None:
     sb.uc_open_with_reconnect(
         "https://sso.garmin.com/portal/sso/en-US/sign-in"
@@ -176,6 +203,13 @@ def _do_login(sb, email: str, password: str) -> None:
         reconnect_time=6,
     )
     sb.sleep(5)
+
+    ready, reason = _probe_email_field(sb)
+    if not ready:
+        print(f"Auto-login skipped: {reason}")
+        print("Handing off to manual login — complete the sign-in in the browser.")
+        _wait_for_manual_login(sb)
+        return
 
     sb.type("#email", email)
     sb.type("#password", password)
@@ -668,13 +702,40 @@ def main():
         print("Starting Xvfb...")
         xvfb = start_xvfb()
 
+    browser_bin = None
+    if platform.system() == "Windows":
+        browser_bin = detect_windows_browser()
+        if browser_bin is None:
+            print("ERROR: No supported browser found. Install Chrome, Brave, or Edge and retry.")
+            sys.exit(1)
+
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
         # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
         # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
-        with SB(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR)) as sb:
-            ensure_logged_in(sb, email, password)
+        sb_kwargs = dict(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR))
+        if browser_bin:
+            sb_kwargs["binary_location"] = browser_bin
+        with SB(**sb_kwargs) as sb:
+            try:
+                ensure_logged_in(sb, email, password)
+            except Exception as exc:
+                shot = Path(tempfile.gettempdir()) / "garmin_login_failure.png"
+                try:
+                    sb.save_screenshot(str(shot))
+                except Exception:
+                    shot = None
+                msg = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+                print(f"ERROR: Login failed — {msg}", file=sys.stderr)
+                if shot:
+                    print(f"Screenshot: {shot}", file=sys.stderr)
+                print(
+                    "If auto-login keeps racing the browser, clear saved credentials and use "
+                    "manual login from the 'Configure auto login' dialog.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
             print("Getting display name...")
             display_name, uuid = get_display_name(sb)
