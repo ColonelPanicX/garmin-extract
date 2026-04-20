@@ -140,6 +140,55 @@ def get_or_create_folder(creds, name: str = "Garmin Extract") -> str:
     return folder["id"]
 
 
+def list_drive_folders(creds, limit: int = 200) -> list[dict[str, str]]:
+    """List user-owned Drive folders. Returns [{id, name, path}, ...].
+
+    path is the folder name plus its immediate parent name when available,
+    to help disambiguate duplicates ("Work / Garmin" vs "Personal / Garmin").
+    """
+    svc = _drive_service(creds)
+    q = "mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = (
+        svc.files()
+        .list(
+            q=q,
+            fields="files(id, name, parents)",
+            pageSize=min(limit, 1000),
+            orderBy="name",
+        )
+        .execute()
+    )
+    folders = results.get("files", [])
+
+    # Resolve parent names with a single follow-up lookup (best effort)
+    parent_ids = {p for f in folders for p in (f.get("parents") or [])}
+    parent_names: dict[str, str] = {}
+    for pid in parent_ids:
+        try:
+            info = svc.files().get(fileId=pid, fields="name").execute()
+            parent_names[pid] = info.get("name", "")
+        except Exception:
+            parent_names[pid] = ""
+
+    out = []
+    for f in folders:
+        parents = f.get("parents") or []
+        parent = parent_names.get(parents[0], "") if parents else ""
+        path = f"{parent} / {f['name']}" if parent else f["name"]
+        out.append({"id": f["id"], "name": f["name"], "path": path})
+    return out
+
+
+def get_folder_name(creds, folder_id: str) -> str:
+    """Return the display name of a folder ID, or empty string on failure."""
+    try:
+        svc = _drive_service(creds)
+        info = svc.files().get(fileId=folder_id, fields="name").execute()
+        return info.get("name", "")
+    except Exception:
+        return ""
+
+
 def upload_csv(creds, csv_path: Path, folder_id: str) -> tuple[str, str]:
     """
     Upload *csv_path* to *folder_id*, updating in-place if it already exists.

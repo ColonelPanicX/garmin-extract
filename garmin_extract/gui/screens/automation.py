@@ -476,6 +476,118 @@ class _GmailSetupDialog(QDialog):
             self._show_error(f"Token exchange failed: {detail}")
 
 
+# ── Drive folder picker ──────────────────────────────────────────────────────
+
+
+class _DriveFolderPickerSignals(QObject):
+    folders_done = Signal(list, str)  # folders, error
+
+
+class _DriveFolderPickerDialog(QDialog):
+    """Lists the user's Drive folders so they can pick a destination for
+    CSV uploads. Writes the selected folder_id back to .drive_config.json.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Choose Drive folder")
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(420)
+        self.setModal(True)
+
+        self.selected_folder_id: str = ""
+        self.selected_folder_name: str = ""
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        intro = QLabel("Pick a folder to archive the CSVs in. Only folders you own are listed.")
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #6c7086;")
+        layout.addWidget(intro)
+
+        self._filter = QLineEdit()
+        self._filter.setPlaceholderText("Filter…")
+        self._filter.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._filter)
+
+        # Lazy import — QListWidget isn't in the top-level imports
+        from PySide6.QtWidgets import QListWidget
+
+        self._list = QListWidget()
+        self._list.itemDoubleClicked.connect(self._on_accept)
+        layout.addWidget(self._list, stretch=1)
+
+        self._status = QLabel("Loading folders…")
+        self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
+        layout.addWidget(self._status)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btn_row.addWidget(cancel)
+        self._ok_btn = QPushButton("Select")
+        self._ok_btn.setDefault(True)
+        self._ok_btn.setEnabled(False)
+        self._ok_btn.clicked.connect(self._on_accept)
+        btn_row.addWidget(self._ok_btn)
+        layout.addLayout(btn_row)
+
+        self._signals = _DriveFolderPickerSignals()
+        self._signals.folders_done.connect(self._on_folders_loaded)
+
+        self._all_folders: list[dict] = []
+        self._list.currentItemChanged.connect(lambda *_: self._ok_btn.setEnabled(True))
+
+        Thread(target=self._load_folders, daemon=True).start()
+
+    def _load_folders(self) -> None:
+        try:
+            from garmin_extract._google_drive import _load_credentials, list_drive_folders
+
+            creds = _load_credentials()
+            folders = list_drive_folders(creds)
+            self._signals.folders_done.emit(folders, "")
+        except Exception as exc:
+            self._signals.folders_done.emit([], str(exc))
+
+    def _on_folders_loaded(self, folders: list, error: str) -> None:
+        if error:
+            self._status.setText(f"Could not load folders: {error}")
+            self._status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            return
+        self._all_folders = folders
+        self._status.setText(f"{len(folders)} folder{'s' if len(folders) != 1 else ''} loaded")
+        self._populate_list(folders)
+
+    def _populate_list(self, folders: list) -> None:
+        self._list.clear()
+        for f in folders:
+            from PySide6.QtWidgets import QListWidgetItem
+
+            item = QListWidgetItem(f["path"])
+            item.setData(Qt.ItemDataRole.UserRole, f)
+            self._list.addItem(item)
+
+    def _apply_filter(self, text: str) -> None:
+        text = text.strip().lower()
+        if not text:
+            self._populate_list(self._all_folders)
+            return
+        filtered = [f for f in self._all_folders if text in f["path"].lower()]
+        self._populate_list(filtered)
+
+    def _on_accept(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            return
+        folder = item.data(Qt.ItemDataRole.UserRole)
+        self.selected_folder_id = folder["id"]
+        self.selected_folder_name = folder["name"]
+        self.accept()
+
+
 # ── Scheduled Pulls dialog ───────────────────────────────────────────────────
 
 
@@ -516,16 +628,46 @@ class _ScheduledPullsDialog(QDialog):
         layout.addLayout(time_row)
 
         # ── Export toggles ──
-        self._push_drive = QCheckBox("Upload CSVs to Google Drive after pull")
+        self._push_drive = QCheckBox("Archive raw CSV files to Google Drive")
+        self._push_drive.toggled.connect(self._on_drive_toggled)
         layout.addWidget(self._push_drive)
 
-        self._push_sheets = QCheckBox("Sync CSVs to Google Sheets after pull")
+        # Drive folder row (only meaningful when Drive is checked)
+        drive_folder_row = QHBoxLayout()
+        drive_folder_row.setContentsMargins(22, 0, 0, 0)  # indent under checkbox
+        self._drive_folder_label = QLabel("Folder: Garmin Extract")
+        self._drive_folder_label.setStyleSheet("color: #6c7086; font-size: 12px;")
+        drive_folder_row.addWidget(self._drive_folder_label, stretch=1)
+        self._drive_folder_btn = QPushButton("Change…")
+        self._drive_folder_btn.setFlat(True)
+        self._drive_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._drive_folder_btn.setStyleSheet(
+            "QPushButton { color: #89b4fa; border: none; text-decoration: underline; }"
+            "QPushButton:hover { color: #b4befe; }"
+            "QPushButton:disabled { color: #45475a; text-decoration: none; }"
+        )
+        self._drive_folder_btn.clicked.connect(self._pick_drive_folder)
+        drive_folder_row.addWidget(self._drive_folder_btn)
+        layout.addLayout(drive_folder_row)
+
+        self._push_sheets = QCheckBox("Populate Google Sheet with data (for viewing/charting)")
         layout.addWidget(self._push_sheets)
+
+        local_note = QLabel(
+            "CSVs are always saved locally to reports/ first. " "These options export them as well."
+        )
+        local_note.setWordWrap(True)
+        local_note.setStyleSheet("color: #6c7086; font-size: 12px; margin-top: 4px;")
+        layout.addWidget(local_note)
 
         self._error = QLabel()
         self._error.setWordWrap(True)
         self._error.hide()
         layout.addWidget(self._error)
+
+        # Initialize Drive folder UI state
+        self._on_drive_toggled(False)
+        self._refresh_drive_folder_label()
 
         # ── Buttons ──
         btn_row = QHBoxLayout()
@@ -579,6 +721,48 @@ class _ScheduledPullsDialog(QDialog):
         self._error.setText(msg)
         self._error.setStyleSheet("color: #f38ba8;")
         self._error.show()
+
+    def _on_drive_toggled(self, checked: bool) -> None:
+        self._drive_folder_label.setEnabled(checked)
+        self._drive_folder_btn.setEnabled(checked)
+
+    def _refresh_drive_folder_label(self) -> None:
+        """Load the configured folder name from config and update the label."""
+        try:
+            from garmin_extract._google_drive import load_config
+
+            cfg = load_config()
+            folder_id = cfg.get("folder_id")
+            if not folder_id:
+                self._drive_folder_label.setText("Folder: Garmin Extract (default)")
+                return
+            # Resolve name in a thread to avoid blocking on network
+            Thread(target=self._resolve_folder_name, args=(folder_id,), daemon=True).start()
+        except Exception:
+            pass
+
+    def _resolve_folder_name(self, folder_id: str) -> None:
+        try:
+            from garmin_extract._google_drive import _load_credentials, get_folder_name
+
+            creds = _load_credentials()
+            name = get_folder_name(creds, folder_id) or folder_id[:12] + "…"
+            # Update label on the main thread via QTimer.singleShot
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, lambda: self._drive_folder_label.setText(f"Folder: {name}"))
+        except Exception:
+            pass
+
+    def _pick_drive_folder(self) -> None:
+        dlg = _DriveFolderPickerDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_folder_id:
+            from garmin_extract._google_drive import load_config, save_config
+
+            cfg = load_config()
+            cfg["folder_id"] = dlg.selected_folder_id
+            save_config(cfg)
+            self._drive_folder_label.setText(f"Folder: {dlg.selected_folder_name}")
 
     def _on_save(self) -> None:
         from garmin_extract._windows_scheduler import create_or_update_task
