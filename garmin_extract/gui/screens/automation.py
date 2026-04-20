@@ -697,9 +697,25 @@ class _ScheduledPullsDialog(QDialog):
         layout.addLayout(time_row)
 
         # ── Export toggles ──
+        drive_row = QHBoxLayout()
         self._push_drive = QCheckBox("Archive raw CSV files to Google Drive")
         self._push_drive.toggled.connect(self._on_drive_toggled)
-        layout.addWidget(self._push_drive)
+        drive_row.addWidget(self._push_drive, stretch=1)
+        drive_help = self._make_help_button(
+            "Archive raw CSV files to Google Drive",
+            (
+                "Uploads garmin_daily.csv and garmin_activities.csv as actual "
+                ".csv files into the Drive folder you choose. Each run overwrites "
+                "the files in place.\n\n"
+                "Best for: backups, version history, downloading the raw data, "
+                "or feeding the CSVs into another tool.\n\n"
+                "Clicking a CSV in Drive opens a read-only Sheets preview. To "
+                "edit it as a Sheet, Drive makes a one-off copy — that copy will "
+                "not update on future pulls."
+            ),
+        )
+        drive_row.addWidget(drive_help)
+        layout.addLayout(drive_row)
 
         # Drive folder row (only meaningful when Drive is checked)
         drive_folder_row = QHBoxLayout()
@@ -719,8 +735,25 @@ class _ScheduledPullsDialog(QDialog):
         drive_folder_row.addWidget(self._drive_folder_btn)
         layout.addLayout(drive_folder_row)
 
+        sheets_row = QHBoxLayout()
         self._push_sheets = QCheckBox("Populate Google Sheet with data (for viewing/charting)")
-        layout.addWidget(self._push_sheets)
+        sheets_row.addWidget(self._push_sheets, stretch=1)
+        sheets_help = self._make_help_button(
+            "Populate Google Sheet with data",
+            (
+                "Writes the CSV data into a persistent Google Sheet named "
+                "'Garmin Data' with two tabs: Daily and Activities. The Sheet's "
+                "URL stays the same run after run — the cells just get refreshed.\n\n"
+                "Best for: bookmarking one URL and coming back to see fresh data, "
+                "building charts / pivot tables / dashboards on top of the sheet, "
+                "or sharing a single live view with someone.\n\n"
+                "Different from the Drive upload: this is a native Sheet, not a "
+                "CSV file, so any charts or formatting you add stay attached and "
+                "keep updating."
+            ),
+        )
+        sheets_row.addWidget(sheets_help)
+        layout.addLayout(sheets_row)
 
         local_note = QLabel(
             "CSVs are always saved locally to reports/ first. " "These options export them as well."
@@ -790,6 +823,30 @@ class _ScheduledPullsDialog(QDialog):
         self._error.setText(msg)
         self._error.setStyleSheet("color: #f38ba8;")
         self._error.show()
+
+    def _make_help_button(self, title: str, body: str) -> QPushButton:
+        """Small circular '?' button that pops an info dialog with *body*."""
+        btn = QPushButton("?")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(22, 22)
+        btn.setStyleSheet(
+            "QPushButton {"
+            " color: #89b4fa; background-color: transparent;"
+            " border: 1px solid #45475a; border-radius: 11px; font-weight: bold;"
+            "}"
+            "QPushButton:hover { border-color: #89b4fa; color: #b4befe; }"
+        )
+        btn.clicked.connect(lambda: self._show_help(title, body))
+        return btn
+
+    def _show_help(self, title: str, body: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(body)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.exec()
 
     def _on_drive_toggled(self, checked: bool) -> None:
         self._drive_folder_label.setEnabled(checked)

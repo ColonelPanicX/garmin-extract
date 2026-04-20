@@ -113,13 +113,26 @@ Alternatively, add the shell wrapper directly to your crontab:
 
 ### 5. Export to Google Drive / Sheets *(optional)*
 
-From the main menu, go to **Automation → Google Drive / Sheets**. Three options:
+From the main menu, go to **Automation → Google Drive / Sheets**. Three options — pick the one that matches how you'll actually use the data:
 
-- **[1] Upload CSVs to Drive** — uploads `garmin_daily.csv` and `garmin_activities.csv` to a `Garmin Extract` folder in your Google Drive. Creates the folder on first run; updates files in-place on subsequent runs.
-- **[2] Sync to Google Sheets** — creates a `Garmin Data` spreadsheet with `Daily` and `Activities` tabs (or updates an existing one). The sheet is cleared and rewritten on each sync.
-- **[3] Both** — runs Drive upload and Sheets sync in sequence.
+- **[1] Upload CSVs to Drive** — *archival*. Uploads `garmin_daily.csv` and `garmin_activities.csv` as raw files into the Drive folder you choose (defaults to `Garmin Extract`). Each run overwrites the files in place. Best for backups, version history, or feeding the CSVs into another tool. Clicking a CSV in Drive opens a read-only Sheets preview; converting it to an editable Sheet produces a one-off copy that won't update on future pulls.
+
+- **[2] Sync to Google Sheets** — *live dashboard*. Writes the data into a persistent `Garmin Data` spreadsheet with `Daily` and `Activities` tabs. The Sheet's URL stays stable run after run — only the cells change. Best for bookmarking a single URL to come back to, building charts / pivots / dashboards on top of the data, or sharing a live view with someone. Charts and formatting you add to the Sheet stay attached and keep updating.
+
+- **[3] Both** — runs Drive upload and Sheets sync in sequence. Fine if you want both the raw-file archive *and* the live Sheet.
 
 The folder ID and sheet ID are saved locally in `.drive_config.json` so subsequent exports update the same resources. Requires Gmail OAuth to be configured first — the same token covers Drive and Sheets access.
+
+**Choosing between them:**
+
+| Use case | Pick |
+|---|---|
+| "Give me backups I can download later." | Upload CSVs to Drive |
+| "Bookmark one Sheet I can open to see today's data." | Sync to Sheets |
+| "Share a live view with my spouse / coach / doctor." | Sync to Sheets |
+| "Build pivot tables or charts that auto-update." | Sync to Sheets |
+| "Export to another tool that reads CSV." | Upload CSVs to Drive |
+| "Both, for belt-and-suspenders." | Both |
 
 ## Usage
 
