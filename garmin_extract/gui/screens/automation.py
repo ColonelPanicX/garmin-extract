@@ -476,6 +476,187 @@ class _GmailSetupDialog(QDialog):
             self._show_error(f"Token exchange failed: {detail}")
 
 
+# ── Drive folder picker ──────────────────────────────────────────────────────
+
+
+class _DriveFolderPickerSignals(QObject):
+    children_done = Signal(str, list, str)  # parent_id, folders, error
+
+
+class _DriveFolderPickerDialog(QDialog):
+    """Hierarchical Drive folder browser. Starts at My Drive, double-click
+    a subfolder to drill in, click 'Select this folder' to pick the
+    current location. Writes the chosen folder_id back to .drive_config.json.
+    """
+
+    ROOT_ID = "root"
+    ROOT_NAME = "My Drive"
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Choose Drive folder")
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(440)
+        self.setModal(True)
+
+        self.selected_folder_id: str = ""
+        self.selected_folder_name: str = ""
+
+        # Navigation state — root-to-current path of {id, name}
+        self._path: list[dict[str, str]] = [{"id": self.ROOT_ID, "name": self.ROOT_NAME}]
+        self._children_cache: dict[str, list[dict[str, str]]] = {}
+        self._current_children: list[dict[str, str]] = []
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        intro = QLabel(
+            "Browse to the folder you want to archive CSVs in, then click "
+            "'Select this folder'. Double-click a subfolder to drill in."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #6c7086;")
+        layout.addWidget(intro)
+
+        # ── Path row ──
+        path_row = QHBoxLayout()
+        self._up_btn = QPushButton("↑ Up")
+        self._up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._up_btn.clicked.connect(self._go_up)
+        path_row.addWidget(self._up_btn)
+        self._path_label = QLabel()
+        self._path_label.setStyleSheet("color: #cdd6f4; font-size: 13px;")
+        path_row.addWidget(self._path_label, stretch=1)
+        layout.addLayout(path_row)
+
+        # ── Filter ──
+        self._filter = QLineEdit()
+        self._filter.setPlaceholderText("Filter subfolders…")
+        self._filter.textChanged.connect(self._apply_filter)
+        layout.addWidget(self._filter)
+
+        # ── Subfolder list ──
+        from PySide6.QtWidgets import QListWidget
+
+        self._list = QListWidget()
+        self._list.itemDoubleClicked.connect(self._enter_selected)
+        layout.addWidget(self._list, stretch=1)
+
+        self._status = QLabel()
+        self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
+        layout.addWidget(self._status)
+
+        # ── Buttons ──
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btn_row.addWidget(cancel)
+        self._select_btn = QPushButton("Select this folder")
+        self._select_btn.setDefault(True)
+        self._select_btn.clicked.connect(self._select_current)
+        btn_row.addWidget(self._select_btn)
+        layout.addLayout(btn_row)
+
+        self._signals = _DriveFolderPickerSignals()
+        self._signals.children_done.connect(self._on_children_loaded)
+
+        self._navigate_to_current()
+
+    # ── Navigation ──
+
+    def _current_parent_id(self) -> str:
+        return self._path[-1]["id"]
+
+    def _current_parent_name(self) -> str:
+        return self._path[-1]["name"]
+
+    def _navigate_to_current(self) -> None:
+        """Reload the listing for self._path[-1]."""
+        self._refresh_path_label()
+        self._up_btn.setEnabled(len(self._path) > 1)
+        self._filter.clear()
+
+        parent_id = self._current_parent_id()
+        if parent_id in self._children_cache:
+            self._current_children = self._children_cache[parent_id]
+            self._populate_list(self._current_children)
+            self._status.setText(self._children_status_text(len(self._current_children)))
+            self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
+            return
+
+        self._list.clear()
+        self._status.setText("Loading…")
+        self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
+        Thread(target=self._load_children, args=(parent_id,), daemon=True).start()
+
+    def _load_children(self, parent_id: str) -> None:
+        try:
+            from garmin_extract._google_drive import _load_credentials, list_folder_children
+
+            creds = _load_credentials()
+            folders = list_folder_children(creds, parent_id)
+            self._signals.children_done.emit(parent_id, folders, "")
+        except Exception as exc:
+            self._signals.children_done.emit(parent_id, [], str(exc))
+
+    def _on_children_loaded(self, parent_id: str, folders: list, error: str) -> None:
+        # Cache regardless of current position, so backtracking is fast
+        if not error:
+            self._children_cache[parent_id] = folders
+        # Only update UI if the user is still here
+        if parent_id != self._current_parent_id():
+            return
+        if error:
+            self._status.setText(f"Could not load folders: {error}")
+            self._status.setStyleSheet("color: #f38ba8; font-size: 12px;")
+            return
+        self._current_children = folders
+        self._status.setText(self._children_status_text(len(folders)))
+        self._populate_list(folders)
+
+    def _children_status_text(self, count: int) -> str:
+        return f"{count} subfolder{'' if count == 1 else 's'} — double-click to open"
+
+    def _refresh_path_label(self) -> None:
+        self._path_label.setText(" › ".join(p["name"] for p in self._path))
+
+    def _populate_list(self, folders: list) -> None:
+        self._list.clear()
+        for f in folders:
+            from PySide6.QtWidgets import QListWidgetItem
+
+            item = QListWidgetItem(f["name"])
+            item.setData(Qt.ItemDataRole.UserRole, f)
+            self._list.addItem(item)
+
+    def _apply_filter(self, text: str) -> None:
+        text = text.strip().lower()
+        if not text:
+            self._populate_list(self._current_children)
+            return
+        filtered = [f for f in self._current_children if text in f["name"].lower()]
+        self._populate_list(filtered)
+
+    def _enter_selected(self) -> None:
+        item = self._list.currentItem()
+        if item is None:
+            return
+        folder = item.data(Qt.ItemDataRole.UserRole)
+        self._path.append({"id": folder["id"], "name": folder["name"]})
+        self._navigate_to_current()
+
+    def _go_up(self) -> None:
+        if len(self._path) > 1:
+            self._path.pop()
+            self._navigate_to_current()
+
+    def _select_current(self) -> None:
+        self.selected_folder_id = self._current_parent_id()
+        self.selected_folder_name = self._current_parent_name()
+        self.accept()
+
+
 # ── Scheduled Pulls dialog ───────────────────────────────────────────────────
 
 
@@ -516,16 +697,79 @@ class _ScheduledPullsDialog(QDialog):
         layout.addLayout(time_row)
 
         # ── Export toggles ──
-        self._push_drive = QCheckBox("Upload CSVs to Google Drive after pull")
-        layout.addWidget(self._push_drive)
+        drive_row = QHBoxLayout()
+        self._push_drive = QCheckBox("Archive raw CSV files to Google Drive")
+        self._push_drive.toggled.connect(self._on_drive_toggled)
+        drive_row.addWidget(self._push_drive, stretch=1)
+        drive_help = self._make_help_button(
+            "Archive raw CSV files to Google Drive",
+            (
+                "Uploads garmin_daily.csv and garmin_activities.csv as actual "
+                ".csv files into the Drive folder you choose. Each run overwrites "
+                "the files in place.\n\n"
+                "Best for: backups, version history, downloading the raw data, "
+                "or feeding the CSVs into another tool.\n\n"
+                "Clicking a CSV in Drive opens a read-only Sheets preview. To "
+                "edit it as a Sheet, Drive makes a one-off copy — that copy will "
+                "not update on future pulls."
+            ),
+        )
+        drive_row.addWidget(drive_help)
+        layout.addLayout(drive_row)
 
-        self._push_sheets = QCheckBox("Sync CSVs to Google Sheets after pull")
-        layout.addWidget(self._push_sheets)
+        # Drive folder row (only meaningful when Drive is checked)
+        drive_folder_row = QHBoxLayout()
+        drive_folder_row.setContentsMargins(22, 0, 0, 0)  # indent under checkbox
+        self._drive_folder_label = QLabel("Folder: Garmin Extract")
+        self._drive_folder_label.setStyleSheet("color: #6c7086; font-size: 12px;")
+        drive_folder_row.addWidget(self._drive_folder_label, stretch=1)
+        self._drive_folder_btn = QPushButton("Change…")
+        self._drive_folder_btn.setFlat(True)
+        self._drive_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._drive_folder_btn.setStyleSheet(
+            "QPushButton { color: #89b4fa; border: none; text-decoration: underline; }"
+            "QPushButton:hover { color: #b4befe; }"
+            "QPushButton:disabled { color: #45475a; text-decoration: none; }"
+        )
+        self._drive_folder_btn.clicked.connect(self._pick_drive_folder)
+        drive_folder_row.addWidget(self._drive_folder_btn)
+        layout.addLayout(drive_folder_row)
+
+        sheets_row = QHBoxLayout()
+        self._push_sheets = QCheckBox("Populate Google Sheet with data (for viewing/charting)")
+        sheets_row.addWidget(self._push_sheets, stretch=1)
+        sheets_help = self._make_help_button(
+            "Populate Google Sheet with data",
+            (
+                "Writes the CSV data into a persistent Google Sheet named "
+                "'Garmin Data' with two tabs: Daily and Activities. The Sheet's "
+                "URL stays the same run after run — the cells just get refreshed.\n\n"
+                "Best for: bookmarking one URL and coming back to see fresh data, "
+                "building charts / pivot tables / dashboards on top of the sheet, "
+                "or sharing a single live view with someone.\n\n"
+                "Different from the Drive upload: this is a native Sheet, not a "
+                "CSV file, so any charts or formatting you add stay attached and "
+                "keep updating."
+            ),
+        )
+        sheets_row.addWidget(sheets_help)
+        layout.addLayout(sheets_row)
+
+        local_note = QLabel(
+            "CSVs are always saved locally to reports/ first. " "These options export them as well."
+        )
+        local_note.setWordWrap(True)
+        local_note.setStyleSheet("color: #6c7086; font-size: 12px; margin-top: 4px;")
+        layout.addWidget(local_note)
 
         self._error = QLabel()
         self._error.setWordWrap(True)
         self._error.hide()
         layout.addWidget(self._error)
+
+        # Initialize Drive folder UI state
+        self._on_drive_toggled(False)
+        self._refresh_drive_folder_label()
 
         # ── Buttons ──
         btn_row = QHBoxLayout()
@@ -579,6 +823,73 @@ class _ScheduledPullsDialog(QDialog):
         self._error.setText(msg)
         self._error.setStyleSheet("color: #f38ba8;")
         self._error.show()
+
+    def _make_help_button(self, title: str, body: str) -> QPushButton:
+        """Small circular '?' button that pops an info dialog with *body*."""
+        btn = QPushButton("?")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(24, 24)
+        btn.setStyleSheet(
+            "QPushButton {"
+            " color: #89b4fa; background-color: transparent;"
+            " border: 1px solid #585b70; border-radius: 12px;"
+            " font-size: 14px; font-weight: bold; padding: 0;"
+            "}"
+            "QPushButton:hover { border-color: #89b4fa; color: #b4befe; }"
+        )
+        btn.clicked.connect(lambda: self._show_help(title, body))
+        return btn
+
+    def _show_help(self, title: str, body: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(body)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.exec()
+
+    def _on_drive_toggled(self, checked: bool) -> None:
+        self._drive_folder_label.setEnabled(checked)
+        self._drive_folder_btn.setEnabled(checked)
+
+    def _refresh_drive_folder_label(self) -> None:
+        """Load the configured folder name from config and update the label."""
+        try:
+            from garmin_extract._google_drive import load_config
+
+            cfg = load_config()
+            folder_id = cfg.get("folder_id")
+            if not folder_id:
+                self._drive_folder_label.setText("Folder: Garmin Extract (default)")
+                return
+            # Resolve name in a thread to avoid blocking on network
+            Thread(target=self._resolve_folder_name, args=(folder_id,), daemon=True).start()
+        except Exception:
+            pass
+
+    def _resolve_folder_name(self, folder_id: str) -> None:
+        try:
+            from garmin_extract._google_drive import _load_credentials, get_folder_name
+
+            creds = _load_credentials()
+            name = get_folder_name(creds, folder_id) or folder_id[:12] + "…"
+            # Update label on the main thread via QTimer.singleShot
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, lambda: self._drive_folder_label.setText(f"Folder: {name}"))
+        except Exception:
+            pass
+
+    def _pick_drive_folder(self) -> None:
+        dlg = _DriveFolderPickerDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.selected_folder_id:
+            from garmin_extract._google_drive import load_config, save_config
+
+            cfg = load_config()
+            cfg["folder_id"] = dlg.selected_folder_id
+            save_config(cfg)
+            self._drive_folder_label.setText(f"Folder: {dlg.selected_folder_name}")
 
     def _on_save(self) -> None:
         from garmin_extract._windows_scheduler import create_or_update_task
