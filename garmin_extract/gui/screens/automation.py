@@ -828,11 +828,12 @@ class _ScheduledPullsDialog(QDialog):
         """Small circular '?' button that pops an info dialog with *body*."""
         btn = QPushButton("?")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(22, 22)
+        btn.setFixedSize(24, 24)
         btn.setStyleSheet(
             "QPushButton {"
             " color: #89b4fa; background-color: transparent;"
-            " border: 1px solid #45475a; border-radius: 11px; font-weight: bold;"
+            " border: 1px solid #585b70; border-radius: 12px;"
+            " font-size: 14px; font-weight: bold; padding: 0;"
             "}"
             "QPushButton:hover { border-color: #89b4fa; color: #b4befe; }"
         )
