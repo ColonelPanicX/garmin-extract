@@ -91,7 +91,7 @@ def wait_for_mfa() -> str:
             print("MFA REQUIRED — polling Gmail automatically...")
             code = wait_for_mfa_gmail(timeout=300)
             if code:
-                print(f"MFA code retrieved from Gmail: {code}")
+                print("MFA obtained.")
                 return code
             print("Gmail poll failed or timed out — falling back to manual entry.")
     except ImportError:
