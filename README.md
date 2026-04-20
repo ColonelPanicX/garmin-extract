@@ -52,9 +52,6 @@ echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \
     | sudo tee /etc/apt/sources.list.d/google-chrome.list
 sudo apt update && sudo apt install -y google-chrome-stable
 
-# Install Xvfb (virtual display — required for headless Chrome)
-sudo apt install -y xvfb
-
 # Install garmin-extract
 git clone https://github.com/ColonelPanicX/garmin-extract.git
 cd garmin-extract
@@ -62,7 +59,7 @@ uv sync
 uv run python -m garmin_extract
 ```
 
-The app auto-starts Xvfb when needed, but the `xvfb` binary must be installed first.
+On first launch, the TUI detects headless Linux and walks you through the remaining prerequisites (Xvfb install, Garmin credentials, Gmail MFA). Because there's no display for a manual login, **all three must be configured** before a pull can run — the preflight gates the **Continue** button until everything is green. The TUI can install Xvfb on apt/dnf/pacman/apk systems; on unrecognized distros, install `xvfb` (or your distro's equivalent) manually.
 
 ## First-time setup
 

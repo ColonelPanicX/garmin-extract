@@ -164,11 +164,9 @@ def _find_chrome() -> tuple[bool, str | None]:
 
 
 def _find_xvfb() -> bool:
-    try:
-        r = subprocess.run(["which", "Xvfb"], capture_output=True, timeout=5)
-        return r.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
+    from garmin_extract._xvfb import is_installed
+
+    return is_installed()
 
 
 def _missing_packages() -> list[str]:
@@ -350,17 +348,20 @@ def check_prerequisites() -> None:  # noqa: C901
             print("  Xvfb (X Virtual Framebuffer) creates a fake, hidden screen")
             print("  so Chrome has somewhere to render without a real display.")
             print()
+            from garmin_extract._xvfb import detect_install_cmd, install
+
+            _, install_str = detect_install_cmd()
             print("  We can install it now:")
-            print("    sudo apt-get install -y xvfb")
+            print(f"    {install_str}")
             print()
             go = prompt_with_navigation("  Install Xvfb now? [Y/n]: ")
             if go.lower() != "n":
                 print()
-                r = subprocess.run(["sudo", "apt-get", "install", "-y", "xvfb"])
-                if r.returncode == 0 and _find_xvfb():
+                ok, detail = install()
+                if ok:
                     console.print("\n  [green]✓[/]  Xvfb installed.")
                 else:
-                    console.print("\n  [red]✗[/]  Installation may not have completed.")
+                    console.print(f"\n  [red]✗[/]  Installation failed: {detail}")
                     issues.append("Xvfb")
             else:
                 print()

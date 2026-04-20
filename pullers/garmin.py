@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,18 @@ from garmin_extract._browser import detect_windows_browser  # noqa: E402
 
 
 def start_xvfb(display=":99"):
+    if shutil.which("Xvfb") is None:
+        from garmin_extract._xvfb import detect_install_cmd
+
+        _, install_str = detect_install_cmd()
+        print("ERROR: Xvfb is required on headless Linux but is not installed.")
+        print(f"  Install it with:  {install_str}")
+        print("  Then re-run this command.")
+        print(
+            "  (Or run the TUI —  uv run python -m garmin_extract  — "
+            "which can install Xvfb for you.)"
+        )
+        sys.exit(1)
     proc = subprocess.Popen(
         ["Xvfb", display, "-screen", "0", "1280x720x24"],
         stdout=subprocess.DEVNULL,
