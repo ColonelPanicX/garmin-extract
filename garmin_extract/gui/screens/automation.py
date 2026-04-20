@@ -480,111 +480,180 @@ class _GmailSetupDialog(QDialog):
 
 
 class _DriveFolderPickerSignals(QObject):
-    folders_done = Signal(list, str)  # folders, error
+    children_done = Signal(str, list, str)  # parent_id, folders, error
 
 
 class _DriveFolderPickerDialog(QDialog):
-    """Lists the user's Drive folders so they can pick a destination for
-    CSV uploads. Writes the selected folder_id back to .drive_config.json.
+    """Hierarchical Drive folder browser. Starts at My Drive, double-click
+    a subfolder to drill in, click 'Select this folder' to pick the
+    current location. Writes the chosen folder_id back to .drive_config.json.
     """
+
+    ROOT_ID = "root"
+    ROOT_NAME = "My Drive"
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Choose Drive folder")
-        self.setMinimumWidth(520)
-        self.setMinimumHeight(420)
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(440)
         self.setModal(True)
 
         self.selected_folder_id: str = ""
         self.selected_folder_name: str = ""
 
+        # Navigation state — root-to-current path of {id, name}
+        self._path: list[dict[str, str]] = [{"id": self.ROOT_ID, "name": self.ROOT_NAME}]
+        self._children_cache: dict[str, list[dict[str, str]]] = {}
+        self._current_children: list[dict[str, str]] = []
+
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        intro = QLabel("Pick a folder to archive the CSVs in. Only folders you own are listed.")
+        intro = QLabel(
+            "Browse to the folder you want to archive CSVs in, then click "
+            "'Select this folder'. Double-click a subfolder to drill in."
+        )
         intro.setWordWrap(True)
         intro.setStyleSheet("color: #6c7086;")
         layout.addWidget(intro)
 
+        # ── Path row ──
+        path_row = QHBoxLayout()
+        self._up_btn = QPushButton("↑ Up")
+        self._up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._up_btn.clicked.connect(self._go_up)
+        path_row.addWidget(self._up_btn)
+        self._path_label = QLabel()
+        self._path_label.setStyleSheet("color: #cdd6f4; font-size: 13px;")
+        path_row.addWidget(self._path_label, stretch=1)
+        layout.addLayout(path_row)
+
+        # ── Filter ──
         self._filter = QLineEdit()
-        self._filter.setPlaceholderText("Filter…")
+        self._filter.setPlaceholderText("Filter subfolders…")
         self._filter.textChanged.connect(self._apply_filter)
         layout.addWidget(self._filter)
 
-        # Lazy import — QListWidget isn't in the top-level imports
+        # ── Subfolder list ──
         from PySide6.QtWidgets import QListWidget
 
         self._list = QListWidget()
-        self._list.itemDoubleClicked.connect(self._on_accept)
+        self._list.itemDoubleClicked.connect(self._enter_selected)
         layout.addWidget(self._list, stretch=1)
 
-        self._status = QLabel("Loading folders…")
+        self._status = QLabel()
         self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
         layout.addWidget(self._status)
 
+        # ── Buttons ──
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         btn_row.addWidget(cancel)
-        self._ok_btn = QPushButton("Select")
-        self._ok_btn.setDefault(True)
-        self._ok_btn.setEnabled(False)
-        self._ok_btn.clicked.connect(self._on_accept)
-        btn_row.addWidget(self._ok_btn)
+        self._select_btn = QPushButton("Select this folder")
+        self._select_btn.setDefault(True)
+        self._select_btn.clicked.connect(self._select_current)
+        btn_row.addWidget(self._select_btn)
         layout.addLayout(btn_row)
 
         self._signals = _DriveFolderPickerSignals()
-        self._signals.folders_done.connect(self._on_folders_loaded)
+        self._signals.children_done.connect(self._on_children_loaded)
 
-        self._all_folders: list[dict] = []
-        self._list.currentItemChanged.connect(lambda *_: self._ok_btn.setEnabled(True))
+        self._navigate_to_current()
 
-        Thread(target=self._load_folders, daemon=True).start()
+    # ── Navigation ──
 
-    def _load_folders(self) -> None:
+    def _current_parent_id(self) -> str:
+        return self._path[-1]["id"]
+
+    def _current_parent_name(self) -> str:
+        return self._path[-1]["name"]
+
+    def _navigate_to_current(self) -> None:
+        """Reload the listing for self._path[-1]."""
+        self._refresh_path_label()
+        self._up_btn.setEnabled(len(self._path) > 1)
+        self._filter.clear()
+
+        parent_id = self._current_parent_id()
+        if parent_id in self._children_cache:
+            self._current_children = self._children_cache[parent_id]
+            self._populate_list(self._current_children)
+            self._status.setText(self._children_status_text(len(self._current_children)))
+            self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
+            return
+
+        self._list.clear()
+        self._status.setText("Loading…")
+        self._status.setStyleSheet("color: #6c7086; font-size: 12px;")
+        Thread(target=self._load_children, args=(parent_id,), daemon=True).start()
+
+    def _load_children(self, parent_id: str) -> None:
         try:
-            from garmin_extract._google_drive import _load_credentials, list_drive_folders
+            from garmin_extract._google_drive import _load_credentials, list_folder_children
 
             creds = _load_credentials()
-            folders = list_drive_folders(creds)
-            self._signals.folders_done.emit(folders, "")
+            folders = list_folder_children(creds, parent_id)
+            self._signals.children_done.emit(parent_id, folders, "")
         except Exception as exc:
-            self._signals.folders_done.emit([], str(exc))
+            self._signals.children_done.emit(parent_id, [], str(exc))
 
-    def _on_folders_loaded(self, folders: list, error: str) -> None:
+    def _on_children_loaded(self, parent_id: str, folders: list, error: str) -> None:
+        # Cache regardless of current position, so backtracking is fast
+        if not error:
+            self._children_cache[parent_id] = folders
+        # Only update UI if the user is still here
+        if parent_id != self._current_parent_id():
+            return
         if error:
             self._status.setText(f"Could not load folders: {error}")
             self._status.setStyleSheet("color: #f38ba8; font-size: 12px;")
             return
-        self._all_folders = folders
-        self._status.setText(f"{len(folders)} folder{'s' if len(folders) != 1 else ''} loaded")
+        self._current_children = folders
+        self._status.setText(self._children_status_text(len(folders)))
         self._populate_list(folders)
+
+    def _children_status_text(self, count: int) -> str:
+        return f"{count} subfolder{'' if count == 1 else 's'} — double-click to open"
+
+    def _refresh_path_label(self) -> None:
+        self._path_label.setText(" › ".join(p["name"] for p in self._path))
 
     def _populate_list(self, folders: list) -> None:
         self._list.clear()
         for f in folders:
             from PySide6.QtWidgets import QListWidgetItem
 
-            item = QListWidgetItem(f["path"])
+            item = QListWidgetItem(f["name"])
             item.setData(Qt.ItemDataRole.UserRole, f)
             self._list.addItem(item)
 
     def _apply_filter(self, text: str) -> None:
         text = text.strip().lower()
         if not text:
-            self._populate_list(self._all_folders)
+            self._populate_list(self._current_children)
             return
-        filtered = [f for f in self._all_folders if text in f["path"].lower()]
+        filtered = [f for f in self._current_children if text in f["name"].lower()]
         self._populate_list(filtered)
 
-    def _on_accept(self) -> None:
+    def _enter_selected(self) -> None:
         item = self._list.currentItem()
         if item is None:
             return
         folder = item.data(Qt.ItemDataRole.UserRole)
-        self.selected_folder_id = folder["id"]
-        self.selected_folder_name = folder["name"]
+        self._path.append({"id": folder["id"], "name": folder["name"]})
+        self._navigate_to_current()
+
+    def _go_up(self) -> None:
+        if len(self._path) > 1:
+            self._path.pop()
+            self._navigate_to_current()
+
+    def _select_current(self) -> None:
+        self.selected_folder_id = self._current_parent_id()
+        self.selected_folder_name = self._current_parent_name()
         self.accept()
 
 

@@ -140,42 +140,36 @@ def get_or_create_folder(creds, name: str = "Garmin Extract") -> str:
     return folder["id"]
 
 
-def list_drive_folders(creds, limit: int = 200) -> list[dict[str, str]]:
-    """List user-owned Drive folders. Returns [{id, name, path}, ...].
+def list_folder_children(creds, parent_id: str = "root") -> list[dict[str, str]]:
+    """List direct child folders of *parent_id*. Returns [{id, name}, ...]
+    sorted by name. Use 'root' as the parent_id for My Drive top level.
 
-    path is the folder name plus its immediate parent name when available,
-    to help disambiguate duplicates ("Work / Garmin" vs "Personal / Garmin").
+    Paginates internally up to a generous cap so large folders still load.
     """
     svc = _drive_service(creds)
-    q = "mimeType='application/vnd.google-apps.folder' and trashed=false"
-    results = (
-        svc.files()
-        .list(
-            q=q,
-            fields="files(id, name, parents)",
-            pageSize=min(limit, 1000),
-            orderBy="name",
-        )
-        .execute()
+    q = (
+        f"'{parent_id}' in parents and "
+        "mimeType='application/vnd.google-apps.folder' and trashed=false"
     )
-    folders = results.get("files", [])
-
-    # Resolve parent names with a single follow-up lookup (best effort)
-    parent_ids = {p for f in folders for p in (f.get("parents") or [])}
-    parent_names: dict[str, str] = {}
-    for pid in parent_ids:
-        try:
-            info = svc.files().get(fileId=pid, fields="name").execute()
-            parent_names[pid] = info.get("name", "")
-        except Exception:
-            parent_names[pid] = ""
-
-    out = []
-    for f in folders:
-        parents = f.get("parents") or []
-        parent = parent_names.get(parents[0], "") if parents else ""
-        path = f"{parent} / {f['name']}" if parent else f["name"]
-        out.append({"id": f["id"], "name": f["name"], "path": path})
+    out: list[dict[str, str]] = []
+    page_token: str | None = None
+    for _ in range(10):  # up to 10 pages of 1000 = 10,000 children
+        resp = (
+            svc.files()
+            .list(
+                q=q,
+                fields="nextPageToken, files(id, name)",
+                pageSize=1000,
+                orderBy="name",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for f in resp.get("files", []):
+            out.append({"id": f["id"], "name": f["name"]})
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
     return out
 
 
