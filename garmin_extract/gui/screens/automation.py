@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import json
 import platform
+import shutil
 from pathlib import Path
 from threading import Thread
 
 from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -154,6 +159,236 @@ class _SectionCard(QFrame):
         return btn
 
 
+# ── Gmail MFA setup dialog ───────────────────────────────────────────────────
+
+
+_OAUTH_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+class _GmailSetupSignals(QObject):
+    token_done = Signal(bool, str)  # ok, detail
+
+
+class _GmailSetupDialog(QDialog):
+    """Walks the user through Gmail OAuth setup: pick credentials, open
+    the authorization URL, paste the resulting code, exchange for a token.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Gmail MFA Setup")
+        self.setMinimumWidth(520)
+        self.setModal(True)
+
+        self._auth_url = ""
+        self._oauth = None
+        self._signals = _GmailSetupSignals()
+        self._signals.token_done.connect(self._on_token_done)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        intro = QLabel(
+            "Gmail MFA automation uses OAuth to read your Garmin MFA emails. "
+            "You'll need a Google Cloud OAuth client (Desktop app) — download the "
+            "JSON credentials file, then follow the steps below."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #6c7086;")
+        layout.addWidget(intro)
+
+        # ── Step 1: credentials file ──
+        step1 = QLabel("Step 1 — Google credentials file")
+        step1.setStyleSheet("font-weight: bold; color: #cdd6f4; margin-top: 8px;")
+        layout.addWidget(step1)
+
+        creds_row = QHBoxLayout()
+        self._creds_status = QLabel()
+        self._creds_status.setWordWrap(True)
+        creds_row.addWidget(self._creds_status, stretch=1)
+        self._browse_btn = QPushButton("Browse…")
+        self._browse_btn.clicked.connect(self._browse_for_creds)
+        creds_row.addWidget(self._browse_btn)
+        layout.addLayout(creds_row)
+
+        # ── Step 2: authorization URL ──
+        step2 = QLabel("Step 2 — Authorize in browser")
+        step2.setStyleSheet("font-weight: bold; color: #cdd6f4; margin-top: 8px;")
+        layout.addWidget(step2)
+
+        self._auth_btn = QPushButton("Open authorization URL")
+        self._auth_btn.clicked.connect(self._open_auth_url)
+        layout.addWidget(self._auth_btn)
+
+        # ── Step 3: paste code ──
+        step3 = QLabel("Step 3 — Paste the authorization code")
+        step3.setStyleSheet("font-weight: bold; color: #cdd6f4; margin-top: 8px;")
+        layout.addWidget(step3)
+
+        self._code_input = QLineEdit()
+        self._code_input.setPlaceholderText("4/0A…")
+        self._code_input.returnPressed.connect(self._complete_setup)
+        layout.addWidget(self._code_input)
+
+        # ── Error/status feedback ──
+        self._error = QLabel()
+        self._error.setWordWrap(True)
+        self._error.hide()
+        layout.addWidget(self._error)
+
+        # ── Buttons ──
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btn_row.addWidget(cancel)
+        self._complete_btn = QPushButton("Complete setup")
+        self._complete_btn.setDefault(True)
+        self._complete_btn.clicked.connect(self._complete_setup)
+        btn_row.addWidget(self._complete_btn)
+        layout.addLayout(btn_row)
+
+        self._refresh_creds_state()
+
+    # ── State ──
+    def _refresh_creds_state(self) -> None:
+        if GMAIL_CREDS_FILE.exists():
+            self._creds_status.setText(f"✓ {GMAIL_CREDS_FILE.name} in place")
+            self._creds_status.setStyleSheet("color: #a6e3a1;")
+            self._auth_btn.setEnabled(True)
+            self._code_input.setEnabled(True)
+            self._complete_btn.setEnabled(True)
+        else:
+            self._creds_status.setText("No credentials file yet — click Browse to pick one")
+            self._creds_status.setStyleSheet("color: #f9e2af;")
+            self._auth_btn.setEnabled(False)
+            self._code_input.setEnabled(False)
+            self._complete_btn.setEnabled(False)
+
+    def _show_error(self, msg: str) -> None:
+        self._error.setText(msg)
+        self._error.setStyleSheet("color: #f38ba8;")
+        self._error.show()
+
+    def _show_info(self, msg: str) -> None:
+        self._error.setText(msg)
+        self._error.setStyleSheet("color: #89b4fa;")
+        self._error.show()
+
+    # ── Step 1 ──
+    def _browse_for_creds(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select google_credentials.json",
+            str(Path.home()),
+            "JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        src = Path(path)
+        try:
+            data = json.loads(src.read_text())
+            if "installed" not in data:
+                self._show_error(
+                    "That file doesn't look like a Google OAuth Desktop app credentials file "
+                    '(missing the "installed" key). Create a Desktop app OAuth client in '
+                    "Google Cloud Console and download its JSON."
+                )
+                return
+        except Exception as exc:
+            self._show_error(f"Couldn't read that file: {exc}")
+            return
+        try:
+            shutil.copy2(src, GMAIL_CREDS_FILE)
+        except Exception as exc:
+            self._show_error(f"Couldn't copy credentials: {exc}")
+            return
+        self._error.hide()
+        self._refresh_creds_state()
+
+    # ── Step 2 ──
+    def _open_auth_url(self) -> None:
+        try:
+            self._build_auth_url()
+        except Exception as exc:
+            self._show_error(f"Couldn't build authorization URL: {exc}")
+            return
+        QDesktopServices.openUrl(self._auth_url)
+        self._show_info("Browser opened — complete consent, then paste the code below.")
+
+    def _build_auth_url(self) -> None:
+        from requests_oauthlib import OAuth2Session
+
+        data = json.loads(GMAIL_CREDS_FILE.read_text())["installed"]
+        self._client_id = data["client_id"]
+        self._client_secret = data["client_secret"]
+        self._auth_uri = data["auth_uri"]
+        self._token_uri = data["token_uri"]
+        self._oauth = OAuth2Session(
+            self._client_id,
+            scope=" ".join(_OAUTH_SCOPES),
+            redirect_uri="urn:ietf:wg:oauth:2.0:oob",
+        )
+        url, _state = self._oauth.authorization_url(
+            self._auth_uri,
+            access_type="offline",
+            prompt="consent",
+        )
+        self._auth_url = url
+
+    # ── Step 3 ──
+    def _complete_setup(self) -> None:
+        code = self._code_input.text().strip()
+        if not code:
+            self._show_error("Paste the authorization code from the browser first.")
+            return
+        if self._oauth is None:
+            try:
+                self._build_auth_url()
+            except Exception as exc:
+                self._show_error(f"Couldn't prepare OAuth session: {exc}")
+                return
+        self._complete_btn.setEnabled(False)
+        self._show_info("Exchanging code for token…")
+        Thread(target=self._exchange_token, args=(code,), daemon=True).start()
+
+    def _exchange_token(self, code: str) -> None:
+        import os
+
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+        try:
+            token = self._oauth.fetch_token(
+                self._token_uri,
+                code=code,
+                client_secret=self._client_secret,
+                include_client_id=True,
+            )
+            token_data = {
+                "token": token.get("access_token"),
+                "refresh_token": token.get("refresh_token"),
+                "token_uri": self._token_uri,
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
+                "scopes": _OAUTH_SCOPES,
+                "expiry": None,
+            }
+            GMAIL_TOKEN_FILE.write_text(json.dumps(token_data, indent=2))
+            self._signals.token_done.emit(True, "")
+        except Exception as exc:
+            self._signals.token_done.emit(False, str(exc))
+
+    def _on_token_done(self, ok: bool, detail: str) -> None:
+        if ok:
+            self.accept()
+        else:
+            self._complete_btn.setEnabled(True)
+            self._show_error(f"Token exchange failed: {detail}")
+
+
 # ── Automation page ──────────────────────────────────────────────────────────
 
 
@@ -189,6 +424,7 @@ class AutomationPage(QWidget):
 
         # ── Gmail MFA card ────────────────────────────
         self._gmail_card = _SectionCard("Gmail MFA", "Automatic MFA code retrieval from Gmail")
+        self._gmail_card.add_action_button("Configure", self._open_gmail_setup)
         layout.addWidget(self._gmail_card)
 
         layout.addSpacing(4)
@@ -258,6 +494,11 @@ class AutomationPage(QWidget):
         from garmin_extract.gui.screens.setup import CredentialsDialog
 
         dlg = CredentialsDialog(self)
+        dlg.exec()
+        self.refresh_status()
+
+    def _open_gmail_setup(self) -> None:
+        dlg = _GmailSetupDialog(self)
         dlg.exec()
         self.refresh_status()
 
