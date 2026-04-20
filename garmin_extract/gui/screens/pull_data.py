@@ -104,11 +104,11 @@ class _LatestSyncCard(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
         layout.addWidget(_SectionHeader("LATEST SYNC"))
         self._status = QLabel()
-        self._status.setWordWrap(True)
         layout.addWidget(self._status)
+        layout.addSpacing(4)
         self.refresh()
 
     def refresh(self) -> None:
@@ -126,9 +126,7 @@ class _LatestSyncCard(QWidget):
                 text = f"{date_iso}  ({days} {word} out of sync)"
                 color = "#f9e2af"
         self._status.setText(text)
-        self._status.setStyleSheet(
-            f"font-size: 14px; color: {color}; background: transparent; padding: 6px 0 4px 0;"
-        )
+        self._status.setStyleSheet(f"font-size: 14px; color: {color}; background: transparent;")
 
 
 # ── Action button widget ─────────────────────────────────────────────────────
