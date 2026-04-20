@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from threading import Thread
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -281,11 +281,13 @@ class PullProgressDialog(QDialog):
         self._build_ui()
         self._wire_signals()
 
-        # Check credentials then start
+        # Defer cred check until after exec() starts the event loop —
+        # otherwise self.reject() fires before the loop exists and the
+        # dialog shows anyway when exec() runs.
         if self._rebuild_only or self._zip_path:
-            self._start_pull()
+            QTimer.singleShot(0, self._start_pull)
         else:
-            self._check_creds_and_start()
+            QTimer.singleShot(0, self._check_creds_and_start)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
