@@ -191,14 +191,25 @@ def ensure_logged_in(sb, email: str = "", password: str = "") -> None:
     sb.uc_open_with_reconnect("https://connect.garmin.com/modern/", reconnect_time=3)
     sb.sleep(3)
 
-    if "sign-in" in sb.get_current_url() or "sso.garmin.com" in sb.get_current_url():
-        if email and password:
-            print("Session expired or new — logging in...")
-            _do_login(sb, email, password)
-        else:
-            _wait_for_manual_login(sb)
+    url = sb.get_current_url()
+    on_signin = "sign-in" in url or "sso.garmin.com" in url
+
+    if not on_signin:
+        # URL looks authenticated, but the page shell can load from cache even
+        # when the session cookie has expired server-side. Probe the display-name
+        # API to confirm the session is actually valid before trusting it.
+        display_name, _ = get_display_name(sb)
+        if display_name:
+            print("Existing session active.")
+            return
+        print("Session cookie loads UI but API is rejecting — treating as expired.")
+        on_signin = True
+
+    if email and password:
+        print("Session expired or new — logging in...")
+        _do_login(sb, email, password)
     else:
-        print("Existing session active.")
+        _wait_for_manual_login(sb)
 
 
 def _wait_for_manual_login(sb) -> None:
