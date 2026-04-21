@@ -134,18 +134,22 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
         elapsed += poll_interval
 
         try:
-            # Search for Garmin MFA emails received since script start
+            # Search for Garmin MFA emails received since script start.
+            # Garmin currently sends from alerts@account.garmin.com with subject
+            # "Your Security Passcode"; older runs used noreply@garmin.com.
+            # Gmail tokenizes on word boundaries, so "passcode" must be listed
+            # explicitly — "code" does not match "Passcode".
             query = (
-                f"from:noreply@garmin.com "
+                f"from:(noreply@garmin.com OR alerts@account.garmin.com) "
                 f"after:{start_epoch_s} "
-                f"subject:(security code OR verification OR sign-in)"
+                f"subject:(security code OR passcode OR verification OR sign-in)"
             )
             result = service.users().messages().list(userId="me", q=query, maxResults=5).execute()
 
             messages = result.get("messages", [])
             if not messages:
-                # Broader fallback — any recent garmin.com email
-                query2 = f"from:garmin.com after:{start_epoch_s}"
+                # Broader fallback — any recent email from a garmin.com domain.
+                query2 = f"from:(garmin.com OR account.garmin.com) after:{start_epoch_s}"
                 result2 = (
                     service.users().messages().list(userId="me", q=query2, maxResults=5).execute()
                 )
