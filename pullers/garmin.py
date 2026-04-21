@@ -22,6 +22,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -90,6 +91,40 @@ def start_xvfb(display=":99"):
     return proc
 
 
+def _reap_profile_orphans(profile_dir: Path) -> None:
+    """Kill any Chrome/uc_driver still holding our profile from a prior crashed run.
+
+    Narrow match on the profile path — we only SIGKILL processes whose argv
+    references this specific user-data-dir, so unrelated Chrome sessions
+    (e.g. a dev's desktop browser) are untouched.
+    """
+    if shutil.which("pgrep") is None:
+        return
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", str(profile_dir)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return
+    if r.returncode != 0:
+        return
+    for pid_str in r.stdout.split():
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            print(f"  [cleanup] killed orphaned pid {pid} holding profile")
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
 # ---------------------------------------------------------------------------
 # MFA handoff
 # ---------------------------------------------------------------------------
@@ -156,14 +191,25 @@ def ensure_logged_in(sb, email: str = "", password: str = "") -> None:
     sb.uc_open_with_reconnect("https://connect.garmin.com/modern/", reconnect_time=3)
     sb.sleep(3)
 
-    if "sign-in" in sb.get_current_url() or "sso.garmin.com" in sb.get_current_url():
-        if email and password:
-            print("Session expired or new — logging in...")
-            _do_login(sb, email, password)
-        else:
-            _wait_for_manual_login(sb)
+    url = sb.get_current_url()
+    on_signin = "sign-in" in url or "sso.garmin.com" in url
+
+    if not on_signin:
+        # URL looks authenticated, but the page shell can load from cache even
+        # when the session cookie has expired server-side. Probe the display-name
+        # API to confirm the session is actually valid before trusting it.
+        display_name, _ = get_display_name(sb)
+        if display_name:
+            print("Existing session active.")
+            return
+        print("Session cookie loads UI but API is rejecting — treating as expired.")
+        on_signin = True
+
+    if email and password:
+        print("Session expired or new — logging in...")
+        _do_login(sb, email, password)
     else:
-        print("Existing session active.")
+        _wait_for_manual_login(sb)
 
 
 def _wait_for_manual_login(sb) -> None:
@@ -720,6 +766,10 @@ def main():
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
+        # Kill any orphaned Chrome/uc_driver still holding this profile from a
+        # prior crashed run. Without this, the new Chrome can't acquire the
+        # profile lock and times out with "failed to close window in 20 seconds".
+        _reap_profile_orphans(PROFILE_DIR)
         # Clear any stale Chrome singleton files from a prior crashed run. Chrome treats
         # leftover SingletonSocket/SingletonCookie as "another instance is already using
         # this profile" and exits before ChromeDriver can connect.

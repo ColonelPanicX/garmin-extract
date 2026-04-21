@@ -123,8 +123,12 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
     print("  [gmail] Polling inbox for Garmin MFA code...")
 
-    # Only look at emails received after this script started
+    # Only look at emails received after this script started. Gmail's after: filter
+    # is second-precision, so a matching email that arrived within the same second as
+    # start_epoch_s can slip through; we apply a strict ms-level internalDate filter
+    # below as the authoritative guard against stale codes from prior runs.
     start_epoch_s = int(time.time())
+    start_ms = start_epoch_s * 1000
     poll_interval = 5  # seconds between checks
     elapsed = 0
     seen_ids = set()  # never re-process the same email
@@ -155,19 +159,34 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
                 )
                 messages = result2.get("messages", [])
 
-            for msg in messages:
-                if msg["id"] in seen_ids:
-                    continue  # already tried this email
-                seen_ids.add(msg["id"])
+            # Enrich with internalDate, drop any email not strictly newer than start,
+            # and process newest-first so a fresh code always wins over a stale one.
+            fresh: list[tuple[str, int]] = []
+            for m in messages:
+                meta = (
+                    service.users()
+                    .messages()
+                    .get(userId="me", id=m["id"], format="minimal")
+                    .execute()
+                )
+                idate = int(meta.get("internalDate", 0))
+                if idate > start_ms:
+                    fresh.append((m["id"], idate))
+            fresh.sort(key=lambda pair: pair[1], reverse=True)
 
-                text = _get_message_text(service, msg["id"])
+            for msg_id, _ in fresh:
+                if msg_id in seen_ids:
+                    continue  # already tried this email
+                seen_ids.add(msg_id)
+
+                text = _get_message_text(service, msg_id)
                 code = _extract_code_from_text(text)
                 if code:
-                    print(f"  [gmail] Found MFA code in email (msg {msg['id'][:8]}...).")
+                    print(f"  [gmail] Found MFA code in email (msg {msg_id[:8]}...).")
                     return code
                 else:
                     print(
-                        f"  [gmail] Email found but no valid code extracted (msg {msg['id'][:8]}...)."  # noqa: E501
+                        f"  [gmail] Email found but no valid code extracted (msg {msg_id[:8]}...)."
                     )
 
             print(f"  [gmail] No code yet ({elapsed}s elapsed)...")
