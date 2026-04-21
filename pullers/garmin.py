@@ -22,6 +22,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -88,6 +89,40 @@ def start_xvfb(display=":99"):
     os.environ["DISPLAY"] = display
     time.sleep(1)
     return proc
+
+
+def _reap_profile_orphans(profile_dir: Path) -> None:
+    """Kill any Chrome/uc_driver still holding our profile from a prior crashed run.
+
+    Narrow match on the profile path — we only SIGKILL processes whose argv
+    references this specific user-data-dir, so unrelated Chrome sessions
+    (e.g. a dev's desktop browser) are untouched.
+    """
+    if shutil.which("pgrep") is None:
+        return
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", str(profile_dir)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return
+    if r.returncode != 0:
+        return
+    for pid_str in r.stdout.split():
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            print(f"  [cleanup] killed orphaned pid {pid} holding profile")
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +755,10 @@ def main():
     try:
         print("Launching browser...")
         PROFILE_DIR.mkdir(exist_ok=True)
+        # Kill any orphaned Chrome/uc_driver still holding this profile from a
+        # prior crashed run. Without this, the new Chrome can't acquire the
+        # profile lock and times out with "failed to close window in 20 seconds".
+        _reap_profile_orphans(PROFILE_DIR)
         # Clear any stale Chrome singleton files from a prior crashed run. Chrome treats
         # leftover SingletonSocket/SingletonCookie as "another instance is already using
         # this profile" and exits before ChromeDriver can connect.
