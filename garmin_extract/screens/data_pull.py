@@ -13,6 +13,30 @@ from textual.widgets import Footer, Header, Input, Static
 _SECTION = "  [bold dim]{title}[/]\n  " + "─" * 51
 
 
+def _launch_pull(app, **kwargs) -> None:
+    """Push PullProgressScreen, gating on LinuxPreflightScreen when relevant."""
+    import platform
+
+    from garmin_extract.screens.pull_progress import PullProgressScreen
+
+    def _go() -> None:
+        app.push_screen(PullProgressScreen(**kwargs))
+
+    skip_preflight = kwargs.get("rebuild_only") or kwargs.get("zip_path")
+    if skip_preflight or platform.system() != "Linux":
+        _go()
+        return
+
+    from garmin_extract.screens.linux_preflight import LinuxPreflightScreen
+
+    def _after(result: str | None) -> None:
+        if result is None:
+            return
+        _go()
+
+    app.push_screen(LinuxPreflightScreen(), _after)
+
+
 def _date_range_label(days: int) -> str:
     today = date.today()
     start = today - timedelta(days=days)
@@ -182,16 +206,13 @@ class DataPullScreen(Screen[None]):
         no_skip: bool = False,
         rebuild_only: bool = False,
     ) -> None:
-        from garmin_extract.screens.pull_progress import PullProgressScreen
-
-        self.app.push_screen(
-            PullProgressScreen(
-                start_date=start_date,
-                days=days,
-                label=label,
-                no_skip=no_skip,
-                rebuild_only=rebuild_only,
-            )
+        _launch_pull(
+            self.app,
+            start_date=start_date,
+            days=days,
+            label=label,
+            no_skip=no_skip,
+            rebuild_only=rebuild_only,
         )
 
     def action_fetch_new(self) -> None:
@@ -340,11 +361,12 @@ class CustomDateScreen(_InputScreen):
         self._push_pull(start, days)
 
     def _push_pull(self, start: str, days: int) -> None:
-        from garmin_extract.screens.pull_progress import PullProgressScreen
-
         self.app.pop_screen()
-        self.app.push_screen(
-            PullProgressScreen(start_date=start, days=days, label=f"Custom  ({start}, {days}d)")
+        _launch_pull(
+            self.app,
+            start_date=start,
+            days=days,
+            label=f"Custom  ({start}, {days}d)",
         )
 
 
@@ -381,15 +403,12 @@ class FullHistoryScreen(_InputScreen):
             error.update("Start date must be before today.")
             return
 
-        from garmin_extract.screens.pull_progress import PullProgressScreen
-
         self.app.pop_screen()
-        self.app.push_screen(
-            PullProgressScreen(
-                start_date=start,
-                days=days,
-                label=f"Full history  ({start} → {yesterday.isoformat()})",
-            )
+        _launch_pull(
+            self.app,
+            start_date=start,
+            days=days,
+            label=f"Full history  ({start} → {yesterday.isoformat()})",
         )
 
 
@@ -421,14 +440,11 @@ class ImportZipScreen(_InputScreen):
             error.update(f"File not found: {raw}")
             return
 
-        from garmin_extract.screens.pull_progress import PullProgressScreen
-
         self.app.pop_screen()
-        self.app.push_screen(
-            PullProgressScreen(
-                start_date="",
-                days=0,
-                label="Garmin bulk export import",
-                zip_path=raw,
-            )
+        _launch_pull(
+            self.app,
+            start_date="",
+            days=0,
+            label="Garmin bulk export import",
+            zip_path=raw,
         )

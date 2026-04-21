@@ -41,9 +41,9 @@ def _check_xvfb() -> tuple[bool, str]:
 
     if os.environ.get("DISPLAY"):
         return True, "Not needed — display available"
-    from garmin_extract.menu import _find_xvfb
+    from garmin_extract._xvfb import is_installed
 
-    found = _find_xvfb()
+    found = is_installed()
     return found, "Installed" if found else "Not found"
 
 
@@ -550,9 +550,12 @@ class _InstallScreen(Screen[None]):
                 proc.wait()
 
         if self._states.get("Xvfb") == "fail":
+            from garmin_extract._xvfb import detect_install_cmd
+
+            argv, _ = detect_install_cmd()
             self.app.call_from_thread(log.write, "\n[bold]Installing Xvfb…[/bold]")
             proc = subprocess.Popen(
-                ["sudo", "apt-get", "install", "-y", "xvfb"],
+                argv,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
