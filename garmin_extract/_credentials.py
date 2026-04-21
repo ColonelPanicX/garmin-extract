@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from garmin_extract._paths import app_root
 
 _SERVICE = "garmin-extract"
@@ -76,13 +78,24 @@ def save_to_keyring(email: str, password: str) -> tuple[bool, str]:
 
 
 def save_to_env(email: str, password: str) -> None:
-    """Write credentials to .env (plaintext)."""
+    """Write credentials to .env (plaintext). Sets 0600 perms on POSIX."""
     lines = [
         "# Garmin Connect credentials",
         f"GARMIN_EMAIL={email}",
         f"GARMIN_PASSWORD={password}",
     ]
     ENV_FILE.write_text("\n".join(lines) + "\n")
+    _lock_down_env(ENV_FILE)
+
+
+def _lock_down_env(path) -> None:
+    """chmod 600 on POSIX so the .env is only readable by the owning user."""
+    if os.name != "posix":
+        return
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def check_credentials() -> tuple[bool, str]:
@@ -153,6 +166,7 @@ def _scrub_env() -> None:
         ENV_FILE.unlink()
     else:
         ENV_FILE.write_text("\n".join(kept) + "\n")
+        _lock_down_env(ENV_FILE)
 
 
 def _load_from_env() -> tuple[str, str]:
