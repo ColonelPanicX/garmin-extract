@@ -106,7 +106,7 @@ def _get_message_text(service, msg_id: str) -> str:
     return plain or html
 
 
-def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
+def wait_for_mfa_gmail(timeout: int = 300, poll_start: float | None = None) -> str | None:
     """
     Poll Gmail for a Garmin MFA code. Returns the code string, or None
     if credentials are unavailable or the poll times out.
@@ -116,6 +116,9 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
     Args:
         timeout: seconds to poll before giving up (default 5 minutes)
+        poll_start: epoch seconds to use as the internalDate anchor instead of
+            now. Pass the script's import-time timestamp so emails sent during
+            browser startup (before this function is called) are not excluded.
     """
     service = _build_gmail_service()
     if not service:
@@ -123,11 +126,12 @@ def wait_for_mfa_gmail(timeout: int = 300) -> str | None:
 
     print("  [gmail] Polling inbox for Garmin MFA code...")
 
-    # Only look at emails received after this script started. Gmail's after: filter
-    # is second-precision, so a matching email that arrived within the same second as
-    # start_epoch_s can slip through; we apply a strict ms-level internalDate filter
-    # below as the authoritative guard against stale codes from prior runs.
-    start_epoch_s = int(time.time())
+    # Anchor to poll_start (script import time) rather than now. Garmin sends
+    # the MFA email during the login sequence — 60–120s before this function is
+    # called on a typical headless VM. Using time.time() here sets start_ms in
+    # the future relative to the email's internalDate, causing the strict filter
+    # below to exclude the very email we're looking for.
+    start_epoch_s = int(poll_start) if poll_start is not None else int(time.time())
     start_ms = start_epoch_s * 1000
     poll_interval = 5  # seconds between checks
     elapsed = 0

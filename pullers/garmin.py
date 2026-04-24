@@ -46,6 +46,11 @@ DATA_DIR = ROOT / "data" / "garmin"
 PROFILE_DIR = ROOT / ".garmin_browser_profile"
 MFA_FILE = ROOT / ".mfa_code"
 RATE_LIMIT = 0.5  # seconds between API calls
+# Captured at import time (= script start). Passed to wait_for_mfa_gmail() so
+# the internalDate filter anchors to before browser startup, not after — Garmin
+# sends the MFA email during the login sequence, which completes 60–120s before
+# wait_for_mfa_gmail() is ever called.
+_PULL_START_S = int(time.time())
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +142,7 @@ def wait_for_mfa() -> str:
 
         if is_configured():
             print("MFA REQUIRED — polling Gmail automatically...")
-            code = wait_for_mfa_gmail(timeout=300)
+            code = wait_for_mfa_gmail(timeout=600, poll_start=_PULL_START_S)
             if code:
                 print("MFA obtained.")
                 return code
@@ -254,8 +259,18 @@ def _do_login(sb, email: str, password: str) -> None:
     sb.uc_open_with_reconnect(
         "https://sso.garmin.com/portal/sso/en-US/sign-in"
         "?clientId=GarminConnect&consumeServiceTicket=false",
-        reconnect_time=6,
+        reconnect_time=8,
     )
+    # UC reconnect on an already-open browser can leave ChromeDriver focused on
+    # a Chrome-internal frame (omnibox autocomplete popup). Iterate handles to
+    # land on the first real page context before probing the email field.
+    try:
+        for handle in sb.driver.window_handles:
+            sb.driver.switch_to.window(handle)
+            if not sb.get_current_url().startswith("chrome://"):
+                break
+    except Exception:
+        pass
     sb.sleep(5)
 
     ready, reason = _probe_email_field(sb)
