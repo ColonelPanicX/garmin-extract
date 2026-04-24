@@ -86,6 +86,10 @@ def start_xvfb(display=":99"):
             "which can install Xvfb for you.)"
         )
         sys.exit(1)
+    # Remove any stale lock file left by a prior crashed run. Xvfb exits
+    # immediately on startup if /tmp/.X<N>-lock exists, even when no process
+    # holds it — same pattern as the Singleton* cleanup for Chrome profiles.
+    Path(f"/tmp/.X{display.lstrip(':')}-lock").unlink(missing_ok=True)
     proc = subprocess.Popen(
         ["Xvfb", display, "-screen", "0", "1280x720x24"],
         stdout=subprocess.DEVNULL,
