@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Daily Garmin Connect data pull
-# Runs via cron — logs to /tmp/garmin-pull.log
+# Logs to <project_dir>/logs/garmin-YYYY-MM-DD.log by default.
+# Override: GARMIN_PULL_LOG=/your/path pull-garmin.sh --push-both
 #
 # Cron example (6 AM daily):
 #   0 6 * * * /path/to/garmin-extract/scripts/pull-garmin.sh
@@ -17,7 +18,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="${PROJECT_DIR}/.venv/bin/python"
-LOG="/tmp/garmin-pull.log"
+LOG="${GARMIN_PULL_LOG:-${PROJECT_DIR}/logs/garmin-$(date '+%Y-%m-%d').log}"
 
 PUSH_DRIVE=0
 PUSH_SHEETS=0
@@ -30,6 +31,7 @@ for arg in "$@"; do
     esac
 done
 
+mkdir -p "$(dirname "$LOG")"
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG"
 cd "$PROJECT_DIR"
 "$PYTHON" pullers/garmin.py >> "$LOG" 2>&1
