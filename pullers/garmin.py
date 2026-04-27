@@ -106,6 +106,11 @@ def _reap_profile_orphans(profile_dir: Path) -> None:
     Narrow match on the profile path — we only SIGKILL processes whose argv
     references this specific user-data-dir, so unrelated Chrome sessions
     (e.g. a dev's desktop browser) are untouched.
+
+    Waits for all killed pids to fully exit before returning. SIGKILL is
+    asynchronous — the kernel schedules termination but file handles and profile
+    locks are not released until exit completes. Returning early races Chrome's
+    profile acquisition against the dying processes.
     """
     if shutil.which("pgrep") is None:
         return
@@ -120,6 +125,8 @@ def _reap_profile_orphans(profile_dir: Path) -> None:
         return
     if r.returncode != 0:
         return
+
+    killed = []
     for pid_str in r.stdout.split():
         try:
             pid = int(pid_str)
@@ -130,8 +137,34 @@ def _reap_profile_orphans(profile_dir: Path) -> None:
         try:
             os.kill(pid, signal.SIGKILL)
             print(f"  [cleanup] killed orphaned pid {pid} holding profile")
+            killed.append(pid)
         except (ProcessLookupError, PermissionError):
             pass
+
+    if not killed:
+        return
+
+    # Poll until every killed pid is confirmed gone. os.kill(pid, 0) raises
+    # ProcessLookupError (ESRCH) once the kernel removes the process table entry,
+    # which is the authoritative signal that file handles and profile locks are
+    # released.
+    deadline = time.monotonic() + 3.0
+    remaining = set(killed)
+    while remaining and time.monotonic() < deadline:
+        still_alive = set()
+        for pid in remaining:
+            try:
+                os.kill(pid, 0)
+                still_alive.add(pid)
+            except ProcessLookupError:
+                pass  # confirmed gone
+            except PermissionError:
+                still_alive.add(pid)  # still exists, can't signal
+        remaining = still_alive
+        if remaining:
+            time.sleep(0.05)
+    if remaining:
+        print(f"  [cleanup] warning: {len(remaining)} orphan(s) did not exit within 3s; proceeding")
 
 
 # ---------------------------------------------------------------------------
