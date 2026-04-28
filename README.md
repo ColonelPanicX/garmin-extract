@@ -89,6 +89,8 @@ The **Latest Sync** header at the top of the Pull Data screen shows how many day
 
 Automation → Gmail MFA → Configure opens a 3-step wizard. Once configured, the app polls Gmail for the MFA code when Garmin asks for one — no manual input required. The same OAuth token grants access to Google Drive and Sheets.
 
+> **OAuth app publishing:** Google expires refresh tokens after **7 days** when your OAuth consent screen is in *Testing* status. To avoid weekly re-auth, go to Google Cloud Console → APIs & Services → OAuth consent screen → Publishing status → **Publish App**. No Google review is required for personal/internal use. After publishing, refresh tokens last indefinitely. Re-run `setup_gmail_auth.py` (or the in-app wizard) once after publishing to get a long-lived token.
+
 ### Scheduled Pulls (Windows)
 
 Automation → Scheduled Pulls → Configure:
@@ -132,6 +134,7 @@ Configure once, run on demand from the Automation page, or bundle with Scheduled
 - **Chrome hangs on startup with "failed to close window in 20 seconds"** — known issue ([#74](https://github.com/ColonelPanicX/garmin-extract/issues/74)). Workaround: use Brave or Edge. The app's browser detection order is Chrome → Brave → Edge; installing Brave alongside Chrome doesn't fix it (Chrome wins detection), but uninstalling Chrome falls through to Brave.
 - **Login keeps failing after a long time** — your Garmin session has expired (happens roughly every 30 days). The app will re-authenticate automatically if credentials and Gmail MFA are configured. If not, the browser will open for manual login.
 - **Gmail MFA doesn't fire** — make sure the OAuth token actually has the `gmail.readonly` scope. Re-run the Gmail MFA wizard if in doubt. The Automation page shows the current Gmail MFA status on mount.
+- **`invalid_grant: Token has been expired or revoked`** — your OAuth refresh token expired. This happens every 7 days when the Google Cloud OAuth consent screen is in *Testing* status. Fix: publish the app (Google Cloud Console → OAuth consent screen → Publish App), then re-run the Gmail MFA wizard once to get a long-lived token.
 - **Metrics start coming back empty or 404** — Garmin's internal API endpoints are reverse-engineered from the Connect web app and occasionally change with app updates. If this happens, the endpoints will need to be re-mapped using Chrome DevTools → Network tab while browsing Garmin Connect.
 
 More detail in the [Troubleshooting wiki page](https://github.com/ColonelPanicX/garmin-extract/wiki/Troubleshooting).
