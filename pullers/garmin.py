@@ -816,17 +816,6 @@ def main():
             sys.exit(1)
 
     try:
-        print("Launching browser...")
-        PROFILE_DIR.mkdir(exist_ok=True)
-        # Kill any orphaned Chrome/uc_driver still holding this profile from a
-        # prior crashed run. Without this, the new Chrome can't acquire the
-        # profile lock and times out with "failed to close window in 20 seconds".
-        _reap_profile_orphans(PROFILE_DIR)
-        # Clear any stale Chrome singleton files from a prior crashed run. Chrome treats
-        # leftover SingletonSocket/SingletonCookie as "another instance is already using
-        # this profile" and exits before ChromeDriver can connect.
-        for stale in PROFILE_DIR.glob("Singleton*"):
-            stale.unlink(missing_ok=True)
         # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
         # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
         sb_kwargs = dict(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR))
@@ -837,56 +826,84 @@ def main():
             sb_kwargs["chromium_arg"] = "--no-sandbox,--disable-dev-shm-usage"
         if browser_bin:
             sb_kwargs["binary_location"] = browser_bin
-        with SB(**sb_kwargs) as sb:
-            try:
-                ensure_logged_in(sb, email, password)
-            except Exception as exc:
-                shot = Path(tempfile.gettempdir()) / "garmin_login_failure.png"
+
+        for _attempt in range(2):
+            print("Launching browser...")
+            PROFILE_DIR.mkdir(exist_ok=True)
+            # Kill any orphaned Chrome/uc_driver still holding this profile from a
+            # prior crashed run. Without this, the new Chrome can't acquire the
+            # profile lock and times out with "failed to close window in 20 seconds".
+            _reap_profile_orphans(PROFILE_DIR)
+            # Clear any stale Chrome singleton files from a prior crashed run. Chrome treats
+            # leftover SingletonSocket/SingletonCookie as "another instance is already using
+            # this profile" and exits before ChromeDriver can connect.
+            for stale in PROFILE_DIR.glob("Singleton*"):
+                stale.unlink(missing_ok=True)
+
+            with SB(**sb_kwargs) as sb:
                 try:
-                    sb.save_screenshot(str(shot))
-                except Exception:
-                    shot = None
-                msg = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-                print(f"ERROR: Login failed — {msg}", file=sys.stderr)
-                if shot:
-                    print(f"Screenshot: {shot}", file=sys.stderr)
-                print(
-                    "If auto-login keeps racing the browser, clear saved credentials and use "
-                    "manual login from the 'Configure auto login' dialog.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+                    ensure_logged_in(sb, email, password)
+                except Exception as exc:
+                    if _attempt == 0 and "failed to close window" in str(exc):
+                        # Internal profile state corruption (stale prefs, bad cache) can cause
+                        # Chrome to hang during UC reconnect even after process/lock cleanup.
+                        # Profile is a session cache — safe to wipe. Retry once with a clean slate.
+                        print(
+                            "  [recovery] Profile corruption suspected — wiping "
+                            ".garmin_browser_profile/ and retrying once...",
+                            file=sys.stderr,
+                        )
+                        shutil.rmtree(PROFILE_DIR, ignore_errors=True)
+                        continue  # exit SB context, go to _attempt == 1
+                    shot = Path(tempfile.gettempdir()) / "garmin_login_failure.png"
+                    try:
+                        sb.save_screenshot(str(shot))
+                    except Exception:
+                        shot = None
+                    msg = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+                    print(f"ERROR: Login failed — {msg}", file=sys.stderr)
+                    if shot:
+                        print(f"Screenshot: {shot}", file=sys.stderr)
+                    print(
+                        "If auto-login keeps racing the browser, clear saved credentials and use "
+                        "manual login from the 'Configure auto login' dialog.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
 
-            print("Getting display name...")
-            display_name, uuid = get_display_name(sb)
-            if not display_name:
-                print("ERROR: Could not retrieve display name — login may have failed.")
-                sys.exit(1)
-            print(f"Logged in as: {display_name} (uuid={uuid or 'unknown'})\n")
+                print("Getting display name...")
+                display_name, uuid = get_display_name(sb)
+                if not display_name:
+                    print("ERROR: Could not retrieve display name — login may have failed.")
+                    sys.exit(1)
+                print(f"Logged in as: {display_name} (uuid={uuid or 'unknown'})\n")
 
-            pull_profile_data(sb, display_name)
+                pull_profile_data(sb, display_name)
 
-            for d in dates:
-                out_path = DATA_DIR / f"{d.isoformat()}.json"
-                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                for d in dates:
+                    out_path = DATA_DIR / f"{d.isoformat()}.json"
+                    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-                if not args.no_skip and out_path.exists():
-                    print(f"[{d}] Already pulled — skipping (--no-skip to re-pull)")
-                    continue
+                    if not args.no_skip and out_path.exists():
+                        print(f"[{d}] Already pulled — skipping (--no-skip to re-pull)")
+                        continue
 
-                print(f"[{d}] Pulling {len(build_metrics(sb, d, display_name, uuid))} metrics...")
-                results = pull_date(sb, d, display_name, uuid)
-                results["_meta"] = {
-                    "date": d.isoformat(),
-                    "pulled_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + "Z",
-                    "source": "garmin-browser",
-                    "display_name": display_name,
-                    "uuid": uuid,
-                }
+                    n_metrics = len(build_metrics(sb, d, display_name, uuid))
+                    print(f"[{d}] Pulling {n_metrics} metrics...")
+                    results = pull_date(sb, d, display_name, uuid)
+                    results["_meta"] = {
+                        "date": d.isoformat(),
+                        "pulled_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + "Z",
+                        "source": "garmin-browser",
+                        "display_name": display_name,
+                        "uuid": uuid,
+                    }
 
-                with open(out_path, "w") as f:
-                    json.dump(results, f, indent=2, default=str)
-                print(f"  → {out_path}\n")
+                    with open(out_path, "w") as f:
+                        json.dump(results, f, indent=2, default=str)
+                    print(f"  → {out_path}\n")
+
+                break  # successful pull — exit retry loop
 
     finally:
         if xvfb:
