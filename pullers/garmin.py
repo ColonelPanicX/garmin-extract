@@ -827,6 +827,10 @@ def main():
         # this profile" and exits before ChromeDriver can connect.
         for stale in PROFILE_DIR.glob("Singleton*"):
             stale.unlink(missing_ok=True)
+        # Remove the LevelDB profile lock. On this KVM/Linux guest Chrome's driver.quit()
+        # does not reliably exit the Chrome process, leaving the lock held. The post-run
+        # reap (in finally) kills it, but belt-and-suspenders here catches any race.
+        (PROFILE_DIR / "Default" / "LOCK").unlink(missing_ok=True)
         # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
         # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
         sb_kwargs = dict(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR))
@@ -889,6 +893,9 @@ def main():
                 print(f"  → {out_path}\n")
 
     finally:
+        # Chrome's driver.quit() does not reliably exit the Chrome process on KVM/Linux.
+        # Kill any survivors now so the profile LOCK is released before the next run.
+        _reap_profile_orphans(PROFILE_DIR)
         if xvfb:
             xvfb.terminate()
 
