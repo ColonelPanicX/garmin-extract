@@ -15,7 +15,7 @@ from pathlib import Path
 if getattr(sys, "frozen", False):
     ROOT = Path(sys.executable).parent
 else:
-    ROOT = Path(__file__).parent.parent
+    ROOT = Path(__file__).resolve().parent.parent
 CREDENTIALS_FILE = ROOT / "google_credentials.json"
 TOKEN_FILE = ROOT / ".google_token.json"
 
@@ -25,8 +25,6 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 def _build_gmail_service():
     """Return an authenticated Gmail API service, or None if not configured."""
     if not TOKEN_FILE.exists():
-        return None
-    if not CREDENTIALS_FILE.exists():
         return None
 
     try:
@@ -203,8 +201,8 @@ def wait_for_mfa_gmail(timeout: int = 300, poll_start: float | None = None) -> s
 
 
 def is_configured() -> bool:
-    """Return True if Gmail credentials are present and the token has the Gmail scope."""
-    if not TOKEN_FILE.exists() or not CREDENTIALS_FILE.exists():
+    """Return True if a Gmail token with the Gmail scope is present."""
+    if not TOKEN_FILE.exists():
         return False
     try:
         import json as _json

@@ -103,9 +103,12 @@ def start_xvfb(display=":99"):
 def _reap_profile_orphans(profile_dir: Path) -> None:
     """Kill any Chrome/uc_driver still holding our profile from a prior crashed run.
 
-    Narrow match on the profile path — we only SIGKILL processes whose argv
-    references this specific user-data-dir, so unrelated Chrome sessions
-    (e.g. a dev's desktop browser) are untouched.
+    Matches the root Chrome process by profile path, then expands to the full
+    process subtree via pgrep -P. Chrome helpers (GPU process, crashpad handler,
+    network service) don't carry --user-data-dir in their own argv, so a narrow
+    profile-path match alone leaves them running and holding X11/Xvfb connections
+    open — which blocks the next Chrome launch. Unrelated Chrome sessions on the
+    same machine are untouched because we anchor on the profile path.
 
     Waits for all killed pids to fully exit before returning. SIGKILL is
     asynchronous — the kernel schedules termination but file handles and profile
@@ -126,14 +129,45 @@ def _reap_profile_orphans(profile_dir: Path) -> None:
     if r.returncode != 0:
         return
 
-    killed = []
+    root_pids: set[int] = set()
     for pid_str in r.stdout.split():
         try:
             pid = int(pid_str)
         except ValueError:
             continue
-        if pid == os.getpid():
-            continue
+        if pid != os.getpid():
+            root_pids.add(pid)
+
+    if not root_pids:
+        return
+
+    # Walk the process tree to collect all descendants of each root Chrome PID.
+    all_pids: set[int] = set(root_pids)
+    frontier = set(root_pids)
+    while frontier:
+        next_frontier: set[int] = set()
+        for pid in frontier:
+            try:
+                cr = subprocess.run(
+                    ["pgrep", "-P", str(pid)],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                continue
+            for cpid_str in cr.stdout.split():
+                try:
+                    cpid = int(cpid_str)
+                except ValueError:
+                    continue
+                if cpid != os.getpid() and cpid not in all_pids:
+                    all_pids.add(cpid)
+                    next_frontier.add(cpid)
+        frontier = next_frontier
+
+    killed = []
+    for pid in all_pids:
         try:
             os.kill(pid, signal.SIGKILL)
             print(f"  [cleanup] killed orphaned pid {pid} holding profile")
@@ -168,6 +202,39 @@ def _reap_profile_orphans(profile_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Browser navigation
+# ---------------------------------------------------------------------------
+
+
+def _uc_navigate(sb, url: str, reconnect_time: float = 3) -> None:
+    """Navigate to url and reconnect ChromeDriver without window.open.
+
+    Chrome 147 blocks window.open("url","_blank") even with --disable-popup-blocking,
+    causing uc_open_with_reconnect to close the only window and land on the Gemini
+    NTP. Navigate in-tab via location.href, disconnect ChromeDriver for bot evasion,
+    then reconnect.
+
+    After reconnect, ChromeDriver may land on a chrome:// internal window (omnibox
+    popup). Iterates handles to find the real page; falls back to driver.get(url) if
+    all handles are chrome:// — meaning the in-tab navigation was abandoned during
+    the reconnect gap.
+    """
+    sb.driver.execute_script(f"window.location.href = '{url}'")
+    time.sleep(0.5)
+    sb.driver.reconnect(reconnect_time)
+    time.sleep(0.004)
+    # After reconnect, find a non-chrome:// handle. If all handles are chrome://,
+    # the navigation was abandoned during the disconnect — re-navigate directly.
+    for handle in sb.driver.window_handles:
+        try:
+            sb.driver.switch_to.window(handle)
+            if not sb.driver.current_url.startswith("chrome://"):
+                return
+        except Exception:
+            pass
+    sb.driver.get(url)
+
+
 # MFA handoff
 # ---------------------------------------------------------------------------
 
@@ -230,7 +297,7 @@ def ensure_logged_in(sb, email: str = "", password: str = "") -> None:
     If email/password are provided, login is automated. Otherwise the browser
     opens to the login page and waits for the user to log in manually.
     """
-    sb.uc_open_with_reconnect("https://connect.garmin.com/modern/", reconnect_time=3)
+    _uc_navigate(sb, "https://connect.garmin.com/modern/", reconnect_time=3)
     sb.sleep(3)
 
     url = sb.get_current_url()
@@ -293,21 +360,12 @@ def _probe_email_field(sb) -> tuple[bool, str]:
 
 
 def _do_login(sb, email: str, password: str) -> None:
-    sb.uc_open_with_reconnect(
+    _uc_navigate(
+        sb,
         "https://sso.garmin.com/portal/sso/en-US/sign-in"
         "?clientId=GarminConnect&consumeServiceTicket=false",
         reconnect_time=8,
     )
-    # UC reconnect on an already-open browser can leave ChromeDriver focused on
-    # a Chrome-internal frame (omnibox autocomplete popup). Iterate handles to
-    # land on the first real page context before probing the email field.
-    try:
-        for handle in sb.driver.window_handles:
-            sb.driver.switch_to.window(handle)
-            if not sb.get_current_url().startswith("chrome://"):
-                break
-    except Exception:
-        pass
     sb.sleep(5)
 
     ready, reason = _probe_email_field(sb)
@@ -421,13 +479,13 @@ def _do_login(sb, email: str, password: str) -> None:
     # If not on connect.garmin.com yet, navigate there to complete session
     if not sb.get_current_url().startswith("https://connect.garmin.com"):
         print("Navigating to connect.garmin.com to complete session...")
-        sb.uc_open_with_reconnect("https://connect.garmin.com/modern/", reconnect_time=3)
+        _uc_navigate(sb, "https://connect.garmin.com/modern/", reconnect_time=3)
         sb.sleep(5)
         sb.save_screenshot(str(Path(tempfile.gettempdir()) / "garmin_after_navigate.png"))
 
     # Ensure we land on the app page which contains the csrf-token meta
     if not sb.get_current_url().startswith("https://connect.garmin.com/app"):
-        sb.uc_open_with_reconnect("https://connect.garmin.com/app/home", reconnect_time=3)
+        _uc_navigate(sb, "https://connect.garmin.com/app/home", reconnect_time=3)
     sb.sleep(5)  # let the SPA fully render and set csrf-token meta
 
     csrf = sb.driver.execute_script(
@@ -827,6 +885,10 @@ def main():
         # this profile" and exits before ChromeDriver can connect.
         for stale in PROFILE_DIR.glob("Singleton*"):
             stale.unlink(missing_ok=True)
+        # Remove the LevelDB profile lock. On this KVM/Linux guest Chrome's driver.quit()
+        # does not reliably exit the Chrome process, leaving the lock held. The post-run
+        # reap (in finally) kills it, but belt-and-suspenders here catches any race.
+        (PROFILE_DIR / "Default" / "LOCK").unlink(missing_ok=True)
         # headless=False required — UC mode's uc_open_with_reconnect closes and reopens the
         # Chrome window as part of its Cloudflare bypass; headless mode breaks that mechanism.
         sb_kwargs = dict(uc=True, headless=False, xvfb=False, user_data_dir=str(PROFILE_DIR))
@@ -889,6 +951,9 @@ def main():
                 print(f"  → {out_path}\n")
 
     finally:
+        # Chrome's driver.quit() does not reliably exit the Chrome process on KVM/Linux.
+        # Kill any survivors now so the profile LOCK is released before the next run.
+        _reap_profile_orphans(PROFILE_DIR)
         if xvfb:
             xvfb.terminate()
 
