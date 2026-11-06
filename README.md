@@ -1,5 +1,17 @@
 # garmin-extract
 
+> [!CAUTION]
+> **This project is defunct and no longer maintained.**
+>
+> In October 2026, Garmin released an official **Personal API**. It gives you read-only access to your own Garmin Connect data with a self-serve API key, so you no longer need a browser or MFA automation.
+>
+> - Create a key: Garmin Connect → Settings → [Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)
+> - Official Python client: [garmin/connect-personal-api-python](https://github.com/garmin/connect-personal-api-python)
+>
+> **Don't use this tool.** It automates logins through a real browser. Now that an official API exists, that kind of traffic is more likely to get your Garmin account flagged or suspended. Releases have been removed. The code stays here for reference only.
+
+---
+
 Pull 30+ daily health metrics from Garmin Connect automatically — including on headless servers where every other Garmin library gets blocked by Cloudflare.
 
 ## Why this exists
